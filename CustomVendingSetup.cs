@@ -34,8 +34,8 @@ namespace Oxide.Plugins
         private const int NoteItemId = 1414245162;
         private const int ItemsPerRow = 6;
 
-        // Going over 7 causes orders to get cut off regardless of resolution.
-        private const int MaxOrderEntries = 7;
+        // Going over 7 causes offers to get cut off regardless of resolution.
+        private const int MaxVendingOffers = 7;
 
         private const int NoteSlot = 5;
         private const int ContainerCapacity = 30;
@@ -109,7 +109,14 @@ namespace Oxide.Plugins
 
         private void OnEntitySpawned(NPCVendingMachine vendingMachine)
         {
-            _vendingMachineManager.OnVendingMachineSpawned(vendingMachine);
+            // Delay to give other plugins a chance to save a reference so they can block setup.
+            NextTick(() =>
+            {
+                if (vendingMachine == null)
+                    return;
+
+                _vendingMachineManager.OnVendingMachineSpawned(vendingMachine);
+            });
         }
 
         private void OnEntityKill(NPCVendingMachine vendingMachine)
@@ -178,7 +185,9 @@ namespace Oxide.Plugins
 
         private class MonumentAdapter
         {
+            public string PrefabName => (string)_monumentInfo["PrefabName"];
             public string Alias => (string)_monumentInfo["Alias"];
+            public Vector3 Position => (Vector3)_monumentInfo["Position"];
 
             private Dictionary<string, object> _monumentInfo;
 
@@ -295,6 +304,16 @@ namespace Oxide.Plugins
 
         #region Helper Methods
 
+        private static bool AreVectorsClose(Vector3 a, Vector3 b, float xZTolerance = 0.001f, float yTolerance = 10)
+        {
+            var diff = a - b;
+
+            // Allow a generous amount of vertical distance given that plugins may snap entities to terrain.
+            return Math.Abs(diff.y) < yTolerance
+                && Math.Abs(diff.x) < xZTolerance
+                && Math.Abs(diff.z) < xZTolerance;
+        }
+
         private bool PassesUICommandChecks(IPlayer player, string[] args, out NPCVendingMachine vendingMachine, out VendingController controller)
         {
             vendingMachine = null;
@@ -351,20 +370,20 @@ namespace Oxide.Plugins
             }
         }
 
-        private static CustomOrderEntry[] GetEntriesFromVendingMachine(NPCVendingMachine vendingMachine)
+        private static VendingOffer[] GetOffersFromVendingMachine(NPCVendingMachine vendingMachine)
         {
-            var vanillaEntries = vendingMachine.vendingOrders.orders;
-            var entries = new CustomOrderEntry[vanillaEntries.Length];
+            var vanillaOffers = vendingMachine.vendingOrders.orders;
+            var offers = new VendingOffer[vanillaOffers.Length];
 
-            for (var i = 0; i < vanillaEntries.Length; i++)
-                entries[i] = CustomOrderEntry.FromVanillaOrderEntry(vanillaEntries[i]);
+            for (var i = 0; i < vanillaOffers.Length; i++)
+                offers[i] = VendingOffer.FromVanillaOrderEntry(vanillaOffers[i]);
 
-            return entries;
+            return offers;
         }
 
-        private static CustomOrderEntry[] GetEntriesFromContainer(ItemContainer container)
+        private static VendingOffer[] GetOffersFromContainer(ItemContainer container)
         {
-            var entries = new List<CustomOrderEntry>();
+            var offers = new List<VendingOffer>();
 
             for (var columnIndex = 0; columnIndex < 2; columnIndex++)
             {
@@ -377,15 +396,15 @@ namespace Oxide.Plugins
                     if (sellItem == null || currencyItem == null)
                         continue;
 
-                    entries.Add(new CustomOrderEntry
+                    offers.Add(new VendingOffer
                     {
-                        SellItem = ItemInfo.FromItem(sellItem),
-                        CurrencyItem = ItemInfo.FromItem(currencyItem),
+                        SellItem = VendingItem.FromItem(sellItem),
+                        CurrencyItem = VendingItem.FromItem(currencyItem),
                     });
                 }
             }
 
-            return entries.ToArray();
+            return offers.ToArray();
         }
 
         private static StorageContainer CreateContainerEntity(string prefabPath)
@@ -419,7 +438,7 @@ namespace Oxide.Plugins
             return (orderIndex % MaxItemRows) * ItemsPerRow + 2;
         }
 
-        private static StorageContainer CreateOrdersContainer(CustomOrderEntry[] customOrderEntries, string shopName)
+        private static StorageContainer CreateOrdersContainer(VendingOffer[] vendingOffers, string shopName)
         {
             var containerEntity = CreateContainerEntity(StoragePrefab);
 
@@ -427,11 +446,11 @@ namespace Oxide.Plugins
             container.allowedContents = ItemContainer.ContentsType.Generic;
             container.capacity = ContainerCapacity;
 
-            for (var orderIndex = 0; orderIndex < customOrderEntries.Length && orderIndex < 2 * MaxItemRows; orderIndex++)
+            for (var orderIndex = 0; orderIndex < vendingOffers.Length && orderIndex < 2 * MaxItemRows; orderIndex++)
             {
-                var entry = customOrderEntries[orderIndex];
-                var sellItem = entry.SellItem.Create();
-                var currencyItem = entry.CurrencyItem.Create();
+                var offer = vendingOffers[orderIndex];
+                var sellItem = offer.SellItem.Create();
+                var currencyItem = offer.CurrencyItem.Create();
 
                 if (sellItem == null || currencyItem == null)
                     continue;
@@ -851,6 +870,51 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region Utilities
+
+        private interface IMonumentRelativePosition
+        {
+            string GetMonumentPrefabName();
+            string GetMonumentAlias();
+            Vector3 GetPosition();
+            Vector3 GetLegacyPosition();
+        }
+
+        private static bool LocationsMatch(IMonumentRelativePosition a, IMonumentRelativePosition b)
+        {
+            return (a.GetMonumentAlias() == b.GetMonumentAlias() || a.GetMonumentPrefabName() == b.GetMonumentPrefabName())
+                && (AreVectorsClose(a.GetPosition(), b.GetPosition()) || AreVectorsClose(a.GetLegacyPosition(), b.GetLegacyPosition()));
+        }
+
+        private struct MonumentRelativePosition : IMonumentRelativePosition
+        {
+            public static MonumentRelativePosition? FromVendingMachine(NPCVendingMachine vendingMachine)
+            {
+                var monument = _pluginInstance.GetMonumentAdapter(vendingMachine);
+                if (monument == null)
+                    return null;
+
+                return new MonumentRelativePosition
+                {
+                    _monument = monument,
+                    _position = monument.InverseTransformPoint(vendingMachine.transform.position),
+                    _legacyPosition = vendingMachine.transform.InverseTransformPoint(monument.Position),
+                };
+            }
+
+            private MonumentAdapter _monument;
+            private Vector3 _position;
+            private Vector3 _legacyPosition;
+
+            // IMonumentRelativePosition members.
+            public string GetMonumentPrefabName() => _monument.PrefabName;
+            public string GetMonumentAlias() => _monument.Alias;
+            public Vector3 GetPosition() => _position;
+            public Vector3 GetLegacyPosition() => _legacyPosition;
+        }
+
+        #endregion
+
         #region Vending Machine Manager
 
         private class VendingMachineManager
@@ -936,7 +1000,7 @@ namespace Oxide.Plugins
             {
                 foreach (var controller in _controllers)
                 {
-                    if (controller.Location.Matches(location))
+                    if (LocationsMatch(controller.Location, location))
                         return controller;
                 }
 
@@ -1003,7 +1067,7 @@ namespace Oxide.Plugins
                     _pluginData.VendingProfiles.Add(Profile);
                 }
 
-                Profile.OrderEntries = GetEntriesFromContainer(Container.inventory);
+                Profile.Offers = GetOffersFromContainer(Container.inventory);
                 Profile.Broadcast = EditFormState.Broadcast;
 
                 var updatedShopName = Container.inventory.GetSlot(NoteSlot)?.text.Trim();
@@ -1037,9 +1101,9 @@ namespace Oxide.Plugins
 
                 EditorPlayer = player;
 
-                var orderEntries = Profile?.OrderEntries ?? GetEntriesFromVendingMachine(vendingMachine);
+                var offers = Profile?.Offers ?? GetOffersFromVendingMachine(vendingMachine);
 
-                Container = CreateOrdersContainer(orderEntries, vendingMachine.shopName);
+                Container = CreateOrdersContainer(offers, vendingMachine.shopName);
                 EditFormState = EditFormState.FromVendingMachine(vendingMachine);
                 Container.SendAsSnapshot(player.Connection);
                 Container.PlayerOpenLoot(player, Container.panelName, doPositionChecks: false);
@@ -1110,7 +1174,7 @@ namespace Oxide.Plugins
             private void AssignProfile(VendingProfile profile)
             {
                 _profile = profile;
-                _refillTimes = new float[_profile.OrderEntries.Length];
+                _refillTimes = new float[_profile.Offers.Length];
 
                 baseEntity.inventory.Clear();
                 ItemManager.DoRemoves();
@@ -1133,18 +1197,18 @@ namespace Oxide.Plugins
                     baseEntity.UpdateMapMarker();
                 }
 
-                for (var i = 0; i < _profile.OrderEntries.Length && i < MaxOrderEntries; i++)
+                for (var i = 0; i < _profile.Offers.Length && i < MaxVendingOffers; i++)
                 {
-                    var entry = _profile.OrderEntries[i];
-                    if (!entry.IsValid)
+                    var offer = _profile.Offers[i];
+                    if (!offer.IsValid)
                         continue;
 
                     baseEntity.AddSellOrder(
-                        entry.SellItem.ItemId,
-                        entry.SellItem.Amount,
-                        entry.CurrencyItem.ItemId,
-                        entry.CurrencyItem.Amount,
-                        baseEntity.GetBPState(entry.SellItem.IsBlueprint, entry.CurrencyItem.IsBlueprint)
+                        offer.SellItem.ItemId,
+                        offer.SellItem.Amount,
+                        offer.CurrencyItem.ItemId,
+                        offer.CurrencyItem.Amount,
+                        baseEntity.GetBPState(offer.SellItem.IsBlueprint, offer.CurrencyItem.IsBlueprint)
                     );
                 }
 
@@ -1153,27 +1217,27 @@ namespace Oxide.Plugins
 
             private void CustomRefill(bool maxRefill = false)
             {
-                for (var i = 0; i < _profile.OrderEntries.Length; i++)
+                for (var i = 0; i < _profile.Offers.Length; i++)
                 {
                     if (_refillTimes[i] > Time.realtimeSinceStartup)
                         continue;
 
-                    var entry = _profile.OrderEntries[i];
-                    if (!entry.IsValid)
+                    var offer = _profile.Offers[i];
+                    if (!offer.IsValid)
                         continue;
 
-                    var totalAmountOfItem = entry.SellItem.GetAmountInContainer(baseEntity.inventory);
-                    var numPurchasesPossible = totalAmountOfItem / entry.SellItem.Amount;
+                    var totalAmountOfItem = offer.SellItem.GetAmountInContainer(baseEntity.inventory);
+                    var numPurchasesPossible = totalAmountOfItem / offer.SellItem.Amount;
                     var refillNumberOfPurchases = MaxPurchasesToStock - numPurchasesPossible;
 
                     if (!maxRefill)
-                        refillNumberOfPurchases = Mathf.Min(refillNumberOfPurchases, entry.RefillAmount);
+                        refillNumberOfPurchases = Mathf.Min(refillNumberOfPurchases, offer.RefillAmount);
 
-                    var refillAmount = refillNumberOfPurchases * entry.SellItem.Amount;
+                    var refillAmount = refillNumberOfPurchases * offer.SellItem.Amount;
                     if (refillAmount > 0)
                     {
                         baseEntity.transactionActive = true;
-                        var item = entry.SellItem.Create(refillAmount);
+                        var item = offer.SellItem.Create(refillAmount);
                         if (item != null)
                         {
                             if (!item.MoveToContainer(baseEntity.inventory))
@@ -1182,7 +1246,7 @@ namespace Oxide.Plugins
                         baseEntity.transactionActive = false;
                     }
 
-                    _refillTimes[i] = Time.realtimeSinceStartup + entry.RefillDelay;
+                    _refillTimes[i] = Time.realtimeSinceStartup + offer.RefillDelay;
                 }
             }
 
@@ -1255,22 +1319,54 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region Legacy Saved Data
+
+        private class LegacyVendingItem
+        {
+            public string Shortname = string.Empty;
+            public string DisplayName = string.Empty;
+            public int Amount = 1;
+            public ulong Skin = 0;
+            public bool IsBlueprint = false;
+        }
+
+        private class LegacyVendingOffer
+        {
+            public LegacyVendingItem Currency = new LegacyVendingItem();
+            public LegacyVendingItem SellItem = new LegacyVendingItem();
+        }
+
+        private class LegacyVendingProfile
+        {
+            public string Id;
+            public List<LegacyVendingOffer> Offers = new List<LegacyVendingOffer>();
+
+            public string Shortname;
+            public Vector3 WorldPosition;
+            public Vector3 RelativePosition;
+            public string RelativeMonument;
+
+            public bool DetectByShortname = false;
+        }
+
+        #endregion
+
         #region Saved Data
 
-        private class ItemInfo
+        private class VendingItem
         {
-            public static ItemInfo FromItem(Item item)
+            public static VendingItem FromItem(Item item)
             {
                 var isBlueprint = item.IsBlueprint();
                 var itemDefinition = isBlueprint
                     ? ItemManager.FindItemDefinition(item.blueprintTarget)
                     : item.info;
 
-                return new ItemInfo
+                return new VendingItem
                 {
                     ShortName = itemDefinition.shortname,
                     Amount = item.amount,
-                    Name = item.name,
+                    DisplayName = item.name,
                     Skin = item.skin,
                     IsBlueprint = isBlueprint,
                 };
@@ -1279,11 +1375,11 @@ namespace Oxide.Plugins
             [JsonProperty("ShortName")]
             public string ShortName;
 
-            [JsonProperty("Amount")]
-            public int Amount = 0;
+            [JsonProperty("DisplayName", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public string DisplayName;
 
-            [JsonProperty("Name", DefaultValueHandling = DefaultValueHandling.Ignore)]
-            public string Name;
+            [JsonProperty("Amount")]
+            public int Amount = 1;
 
             [JsonProperty("Skin", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public ulong Skin = 0;
@@ -1311,7 +1407,7 @@ namespace Oxide.Plugins
             public int ItemId => Definition.itemid;
 
             public Item Create(int amount) =>
-                IsValid ? CreateItem(Definition, amount, Name, Skin, IsBlueprint) : null;
+                IsValid ? CreateItem(Definition, amount, DisplayName, Skin, IsBlueprint) : null;
 
             public Item Create() => Create(Amount);
 
@@ -1331,19 +1427,19 @@ namespace Oxide.Plugins
             }
         }
 
-        private class CustomOrderEntry
+        private class VendingOffer
         {
-            public static CustomOrderEntry FromVanillaOrderEntry(NPCVendingOrder.Entry entry)
+            public static VendingOffer FromVanillaOrderEntry(NPCVendingOrder.Entry entry)
             {
-                return new CustomOrderEntry
+                return new VendingOffer
                 {
-                    SellItem = new ItemInfo
+                    SellItem = new VendingItem
                     {
                         ShortName = entry.sellItem.shortname,
                         Amount = entry.sellItemAmount,
                         IsBlueprint = entry.sellItemAsBP,
                     },
-                    CurrencyItem = new ItemInfo
+                    CurrencyItem = new VendingItem
                     {
                         ShortName = entry.currencyItem.shortname,
                         Amount = entry.currencyAmount,
@@ -1353,10 +1449,10 @@ namespace Oxide.Plugins
             }
 
             [JsonProperty("SellItem")]
-            public ItemInfo SellItem;
+            public VendingItem SellItem;
 
             [JsonProperty("CurrencyItem")]
-            public ItemInfo CurrencyItem;
+            public VendingItem CurrencyItem;
 
             [JsonProperty("RefillAmount", DefaultValueHandling = DefaultValueHandling.Ignore)]
             [DefaultValue(1)]
@@ -1394,52 +1490,17 @@ namespace Oxide.Plugins
             public bool IsValid => SellItem.IsValid && CurrencyItem.IsValid;
         }
 
-        private static bool AreVectorsClose(Vector3 a, Vector3 b, float xZTolerance = 0.001f, float yTolerance = 10)
-        {
-            var diff = a - b;
-
-            // Allow a generous amount of vertical distance given that plugins may snap entities to terrain.
-            return Math.Abs(diff.y) < yTolerance
-                && Math.Abs(diff.x) < xZTolerance
-                && Math.Abs(diff.z) < xZTolerance;
-        }
-
-        private struct MonumentRelativePosition
-        {
-            public static MonumentRelativePosition? FromVendingMachine(NPCVendingMachine vendingMachine)
-            {
-                var monument = _pluginInstance.GetMonumentAdapter(vendingMachine);
-                if (monument == null)
-                    return null;
-
-                return new MonumentRelativePosition
-                {
-                    Monument = monument.Alias,
-                    Position = monument.InverseTransformPoint(vendingMachine.transform.position),
-                };
-            }
-
-            public string Monument;
-            public Vector3 Position;
-
-            public bool Matches(MonumentRelativePosition other)
-            {
-                return Monument == other.Monument
-                    && AreVectorsClose(Position, other.Position);
-            }
-        }
-
-        private class VendingProfile
+        private class VendingProfile : IMonumentRelativePosition
         {
             public static VendingProfile FromVendingMachine(MonumentRelativePosition location, NPCVendingMachine vendingMachine)
             {
                 return new VendingProfile
                 {
-                    Monument = location.Monument,
-                    Position = location.Position,
+                    Monument = location.GetMonumentPrefabName(),
+                    Position = location.GetPosition(),
                     ShopName = vendingMachine.shopName,
                     Broadcast = vendingMachine.IsBroadcasting(),
-                    OrderEntries = GetEntriesFromVendingMachine(vendingMachine),
+                    Offers = GetOffersFromVendingMachine(vendingMachine),
                 };
             }
 
@@ -1453,26 +1514,87 @@ namespace Oxide.Plugins
             [JsonProperty("Monument")]
             public string Monument;
 
-            [JsonProperty("Position")]
+            [JsonProperty("MonumentAlias", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public string MonumentAlias;
+
+            [JsonProperty("Position", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public Vector3 Position;
 
-            [JsonProperty("OrderEntries")]
-            public CustomOrderEntry[] OrderEntries;
+            [JsonProperty("LegacyPosition", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public Vector3 LegacyPosition;
 
-            public bool MatchesLocation(MonumentRelativePosition location)
-            {
-                return Monument == location.Monument
-                    && AreVectorsClose(Position, location.Position);
-            }
+            [JsonProperty("Offers")]
+            public VendingOffer[] Offers;
+
+            // IMonumentRelativePosition members.
+            public string GetMonumentPrefabName() => Monument;
+            public string GetMonumentAlias() => MonumentAlias;
+            public Vector3 GetPosition() => Position;
+            public Vector3 GetLegacyPosition() => LegacyPosition;
         }
 
         private class SavedData
         {
+            // Legacy data for v1.
+            [JsonProperty("Vendings", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public List<LegacyVendingProfile> Vendings;
+
             [JsonProperty("VendingProfiles")]
             public List<VendingProfile> VendingProfiles = new List<VendingProfile>();
 
-            public static SavedData Load() =>
-                Interface.Oxide.DataFileSystem.ReadObject<SavedData>(_pluginInstance.Name) ?? new SavedData();
+            public static SavedData Load()
+            {
+                var data = Interface.Oxide.DataFileSystem.ReadObject<SavedData>(_pluginInstance.Name) ?? new SavedData();
+
+                var dataMigrated = false;
+
+                if (data.Vendings != null)
+                {
+                    foreach (var legacyProfile in data.Vendings)
+                    {
+                        var profile = new VendingProfile
+                        {
+                            Monument = legacyProfile.RelativeMonument,
+                            LegacyPosition = legacyProfile.RelativePosition,
+                            Offers = new VendingOffer[legacyProfile.Offers.Count],
+                        };
+
+                        for (var i = 0; i < legacyProfile.Offers.Count; i++)
+                        {
+                            var legacyOffer = legacyProfile.Offers[i];
+
+                            profile.Offers[i] = new VendingOffer
+                            {
+                                SellItem = new VendingItem
+                                {
+                                    ShortName = legacyOffer.SellItem.Shortname,
+                                    DisplayName = !string.IsNullOrEmpty(legacyOffer.SellItem.DisplayName) ? legacyOffer.SellItem.DisplayName : null,
+                                    Amount = legacyOffer.SellItem.Amount,
+                                    Skin = legacyOffer.SellItem.Skin,
+                                    IsBlueprint = legacyOffer.SellItem.IsBlueprint,
+                                },
+                                CurrencyItem = new VendingItem
+                                {
+                                    ShortName = legacyOffer.Currency.Shortname,
+                                    DisplayName = !string.IsNullOrEmpty(legacyOffer.Currency.DisplayName) ? legacyOffer.Currency.DisplayName : null,
+                                    Amount = legacyOffer.Currency.Amount,
+                                    Skin = legacyOffer.Currency.Skin,
+                                    IsBlueprint = legacyOffer.Currency.IsBlueprint,
+                                },
+                            };
+                        }
+
+                        data.VendingProfiles.Add(profile);
+                    }
+
+                    dataMigrated = data.Vendings.Count > 0;
+                    data.Vendings = null;
+                    data.Save();
+                    _pluginInstance.LogWarning($"Migrated data file to new format.");
+                }
+
+                return data;
+            }
 
             public void Save() =>
                 Interface.Oxide.DataFileSystem.WriteObject<SavedData>(_pluginInstance.Name, this);
@@ -1481,8 +1603,16 @@ namespace Oxide.Plugins
             {
                 foreach (var profile in VendingProfiles)
                 {
-                    if (profile.MatchesLocation(location))
+                    if (LocationsMatch(profile, location))
+                    {
+                        if (profile.LegacyPosition != Vector3.zero)
+                        {
+                            // Fix profile positioning.
+                            profile.Position = location.GetPosition();
+                            profile.LegacyPosition = Vector3.zero;
+                        }
                         return profile;
+                    }
                 }
 
                 return null;
