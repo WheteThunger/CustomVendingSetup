@@ -45,8 +45,6 @@ namespace Oxide.Plugins
         private VendingUIManager _vendingUIManager = new VendingUIManager();
         private ContainerUIManager _containerUIManager = new ContainerUIManager();
 
-        private StorageContainer _sharedContainerEntity;
-
         private DynamicHookSubscriber<ulong> _uiViewers = new DynamicHookSubscriber<ulong>(
             nameof(OnLootEntityEnd)
         );
@@ -73,10 +71,6 @@ namespace Oxide.Plugins
             if (CheckDependencies())
                 NextTick(_vendingMachineManager.SetupAll);
 
-            _sharedContainerEntity = CreateContainerEntity(StoragePrefab);
-            if (_sharedContainerEntity == null)
-                LogError($"Failed to create storage entity with prefab: {StoragePrefab}");
-
             foreach (var player in BasePlayer.activePlayerList)
             {
                 var container = player.inventory.loot.containers.FirstOrDefault();
@@ -98,9 +92,6 @@ namespace Oxide.Plugins
             _containerUIManager.DestroyForAllPlayers();
 
             _vendingMachineManager.ResetAll();
-
-            if (_sharedContainerEntity != null)
-                _sharedContainerEntity.Kill();
 
             _pluginData = null;
             _pluginInstance = null;
@@ -156,10 +147,9 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (storageContainer == _sharedContainerEntity)
+            if (storageContainer.PrefabName == StoragePrefab)
             {
-                var container = player.inventory.loot.containers.FirstOrDefault();
-                var controller = _vendingMachineManager.GetControllerByContainer(container);
+                var controller = _vendingMachineManager.GetControllerByContainer(storageContainer);
                 if (controller == null)
                     return;
 
@@ -351,21 +341,6 @@ namespace Oxide.Plugins
             return item;
         }
 
-        private static void StartLooting(BasePlayer player, ItemContainer container, string panelName = null)
-        {
-            var containerEntity = _pluginInstance._sharedContainerEntity;
-
-            player.inventory.loot.Clear();
-            player.inventory.loot.PositionChecks = false;
-            player.inventory.loot.entitySource = containerEntity;
-            player.inventory.loot.itemSource = null;
-            player.inventory.loot.MarkDirty();
-            player.inventory.loot.AddContainer(container);
-            player.inventory.loot.SendImmediate();
-
-            player.ClientRPCPlayer(null, player, "RPC_OpenLootPanel", panelName ?? containerEntity.panelName);
-        }
-
         private static void OpenVendingMachine(BasePlayer player, NPCVendingMachine vendingMachine)
         {
             if (vendingMachine.OccupiedCheck(player))
@@ -436,15 +411,6 @@ namespace Oxide.Plugins
             return container;
         }
 
-        private static ItemContainer CreateContainer()
-        {
-            var container = new ItemContainer();
-            container.entityOwner = _pluginInstance._sharedContainerEntity;
-            container.isServer = true;
-            container.GiveUID();
-            return container;
-        }
-
         private static int OrderIndexToSlot(int orderIndex)
         {
             if (orderIndex < MaxItemRows)
@@ -453,9 +419,11 @@ namespace Oxide.Plugins
             return (orderIndex % MaxItemRows) * ItemsPerRow + 2;
         }
 
-        private static ItemContainer CreateOrdersContainer(CustomOrderEntry[] customOrderEntries, string shopName)
+        private static StorageContainer CreateOrdersContainer(CustomOrderEntry[] customOrderEntries, string shopName)
         {
-            var container = CreateContainer();
+            var containerEntity = CreateContainerEntity(StoragePrefab);
+
+            var container = containerEntity.inventory;
             container.allowedContents = ItemContainer.ContentsType.Generic;
             container.capacity = ContainerCapacity;
 
@@ -485,7 +453,7 @@ namespace Oxide.Plugins
                     noteItem.Remove();
             }
 
-            return container;
+            return containerEntity;
         }
 
         #endregion
@@ -935,7 +903,7 @@ namespace Oxide.Plugins
                     : null;
             }
 
-            public VendingController GetControllerByContainer(ItemContainer container)
+            public VendingController GetControllerByContainer(StorageContainer container)
             {
                 foreach (var controller in _controllersByVendingMachine.Values)
                 {
@@ -1000,7 +968,7 @@ namespace Oxide.Plugins
             public VendingProfile Profile { get; private set; }
 
             // These are temporary fields while the profile is being edited.
-            public ItemContainer Container { get; private set; }
+            public StorageContainer Container { get; private set; }
             public BasePlayer EditorPlayer { get; private set; }
             public EditFormState EditFormState { get; private set; }
 
@@ -1035,10 +1003,10 @@ namespace Oxide.Plugins
                     _pluginData.VendingProfiles.Add(Profile);
                 }
 
-                Profile.OrderEntries = GetEntriesFromContainer(Container);
+                Profile.OrderEntries = GetEntriesFromContainer(Container.inventory);
                 Profile.Broadcast = EditFormState.Broadcast;
 
-                var updatedShopName = Container.GetSlot(NoteSlot)?.text.Trim();
+                var updatedShopName = Container.inventory.GetSlot(NoteSlot)?.text.Trim();
                 if (!string.IsNullOrEmpty(updatedShopName))
                     Profile.ShopName = updatedShopName;
 
@@ -1073,7 +1041,8 @@ namespace Oxide.Plugins
 
                 Container = CreateOrdersContainer(orderEntries, vendingMachine.shopName);
                 EditFormState = EditFormState.FromVendingMachine(vendingMachine);
-                StartLooting(player, Container);
+                Container.SendAsSnapshot(player.Connection);
+                Container.PlayerOpenLoot(player, Container.panelName, doPositionChecks: false);
             }
 
             public void AddVendingMachine(NPCVendingMachine vendingMachine)
@@ -1099,7 +1068,13 @@ namespace Oxide.Plugins
 
             private void KillContainer()
             {
-                Container?.Kill();
+                if (Container == null || Container.IsDestroyed)
+                    return;
+
+                if (EditorPlayer != null && EditorPlayer.IsConnected)
+                    Container.OnNetworkSubscribersLeave(new List<Network.Connection> { EditorPlayer.Connection });
+
+                Container.Kill();
                 Container = null;
             }
         }
