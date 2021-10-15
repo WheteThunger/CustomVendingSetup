@@ -64,23 +64,33 @@ namespace Oxide.Plugins
             permission.RegisterPermission(PermissionUse, this);
 
             _uiViewers.UnsubscribeAll();
+
+            Unsubscribe(nameof(OnEntitySpawned));
         }
 
         private void OnServerInitialized()
         {
             if (CheckDependencies())
-                NextTick(_vendingMachineManager.SetupAll);
-
-            foreach (var player in BasePlayer.activePlayerList)
             {
-                var container = player.inventory.loot.containers.FirstOrDefault();
-                if (container == null)
-                    continue;
+                // Delay to allow Monument Finder to register monuments via its OnServerInitialized() hook.
+                NextTick(() =>
+                {
+                    _vendingMachineManager.SetupAll();
 
-                var vendingMachine = container.entityOwner as NPCVendingMachine;
-                if (vendingMachine != null)
-                    OnLootEntity(player, vendingMachine);
+                    foreach (var player in BasePlayer.activePlayerList)
+                    {
+                        var container = player.inventory.loot.containers.FirstOrDefault();
+                        if (container == null)
+                            continue;
+
+                        var vendingMachine = container.entityOwner as NPCVendingMachine;
+                        if (vendingMachine != null)
+                            OnLootEntity(player, vendingMachine);
+                    }
+                });
             }
+
+            Subscribe(nameof(OnEntitySpawned));
 
             _blueprintDefinition = ItemManager.FindItemDefinition("blueprintbase");
             _serverInitialized = true;
