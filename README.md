@@ -27,9 +27,9 @@ When you open an NPC vending machine at a monument, if you have permission, you 
 
 ## Screenshots
 
-![](./ShopView.png)
+![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/ShopView.png)
 
-![](./ContainerView.png)
+![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/ContainerView.png)
 
 ## Localization
 
