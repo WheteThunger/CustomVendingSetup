@@ -260,16 +260,15 @@ namespace Oxide.Plugins
         [Command("customvendingsetup.ui")]
         private void CommandUI(IPlayer player, string cmd, string[] args)
         {
+            if (args.Length < 2)
+                return;
+
             NPCVendingMachine vendingMachine;
             VendingController controller;
             if (!PassesUICommandChecks(player, args, out vendingMachine, out controller))
                 return;
 
             var basePlayer = player.Object as BasePlayer;
-
-            if (args.Length < 2)
-                return;
-
             var subCommand = args[1];
 
             switch (subCommand)
@@ -316,12 +315,10 @@ namespace Oxide.Plugins
 
         private static bool AreVectorsClose(Vector3 a, Vector3 b, float xZTolerance = 0.001f, float yTolerance = 10)
         {
-            var diff = a - b;
-
             // Allow a generous amount of vertical distance given that plugins may snap entities to terrain.
-            return Math.Abs(diff.y) < yTolerance
-                && Math.Abs(diff.x) < xZTolerance
-                && Math.Abs(diff.z) < xZTolerance;
+            return Math.Abs(a.y - b.y) < yTolerance
+                && Math.Abs(a.x - b.x) < xZTolerance
+                && Math.Abs(a.z - b.z) < xZTolerance;
         }
 
         private bool PassesUICommandChecks(IPlayer player, string[] args, out NPCVendingMachine vendingMachine, out VendingController controller)
@@ -460,10 +457,15 @@ namespace Oxide.Plugins
             {
                 var offer = vendingOffers[orderIndex];
                 var sellItem = offer.SellItem.Create();
-                var currencyItem = offer.CurrencyItem.Create();
-
-                if (sellItem == null || currencyItem == null)
+                if (sellItem == null)
                     continue;
+
+                var currencyItem = offer.CurrencyItem.Create();
+                if (currencyItem == null)
+                {
+                    sellItem.Remove();
+                    continue;
+                }
 
                 var destinationSlot = OrderIndexToSlot(orderIndex);
 
@@ -532,12 +534,6 @@ namespace Oxide.Plugins
                 CuiHelper.DestroyUi(player, uiName);
             }
 
-            public virtual void CreateUI(BasePlayer player, string json)
-            {
-                _viewingPlayers.Add(player);
-                CuiHelper.AddUi(player, json);
-            }
-
             public virtual void CreateUI(BasePlayer player, CuiElementContainer cuiElements)
             {
                 _viewingPlayers.Add(player);
@@ -590,7 +586,6 @@ namespace Oxide.Plugins
                 };
 
                 var buttonIndex = 0;
-
                 var vendingMachineId = vendingMachine.net.ID;
 
                 if (profile != null)
@@ -892,8 +887,14 @@ namespace Oxide.Plugins
 
         private static bool LocationsMatch(IMonumentRelativePosition a, IMonumentRelativePosition b)
         {
-            return (a.GetMonumentAlias() == b.GetMonumentAlias() || a.GetMonumentPrefabName() == b.GetMonumentPrefabName())
-                && (AreVectorsClose(a.GetPosition(), b.GetPosition()) || AreVectorsClose(a.GetLegacyPosition(), b.GetLegacyPosition()));
+            var monumentsMatch = a.GetMonumentAlias() != null && a.GetMonumentAlias() == b.GetMonumentAlias()
+                || a.GetMonumentPrefabName() == b.GetMonumentPrefabName();
+
+            if (!monumentsMatch)
+                return false;
+
+            return AreVectorsClose(a.GetPosition(), b.GetPosition())
+                || AreVectorsClose(a.GetLegacyPosition(), b.GetLegacyPosition());
         }
 
         private struct MonumentRelativePosition : IMonumentRelativePosition
@@ -1055,12 +1056,6 @@ namespace Oxide.Plugins
                 Profile = _pluginData.FindProfile(location);
             }
 
-            public void SetupAll()
-            {
-                foreach (var vendingMachine in _vendingMachineList)
-                    VendingMachineComponent.AddToVendingMachine(vendingMachine, Profile);
-            }
-
             public void ResetAll()
             {
                 foreach (var vendingMachine in _vendingMachineList)
@@ -1140,6 +1135,12 @@ namespace Oxide.Plugins
                     EditorPlayer.EndLooting();
             }
 
+            private void SetupAll()
+            {
+                foreach (var vendingMachine in _vendingMachineList)
+                    VendingMachineComponent.AddToVendingMachine(vendingMachine, Profile);
+            }
+
             private void KillContainer()
             {
                 if (Container == null || Container.IsDestroyed)
@@ -1184,6 +1185,9 @@ namespace Oxide.Plugins
             private void AssignProfile(VendingProfile profile)
             {
                 _profile = profile;
+                if (_profile?.Offers == null)
+                    return;
+
                 _refillTimes = new float[_profile.Offers.Length];
 
                 baseEntity.inventory.Clear();
@@ -1507,6 +1511,7 @@ namespace Oxide.Plugins
                 return new VendingProfile
                 {
                     Monument = location.GetMonumentPrefabName(),
+                    MonumentAlias = location.GetMonumentAlias(),
                     Position = location.GetPosition(),
                     ShopName = vendingMachine.shopName,
                     Broadcast = vendingMachine.IsBroadcasting(),
