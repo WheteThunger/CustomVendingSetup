@@ -1,8 +1,8 @@
 ## Features
 
-- Allows editing sell orders of monument vending machines
+- Allows customizing items sold at monument vending machines
 - Supports vanilla monuments, custom monuments, train tunnels, and underwater labs (via Monument Finder)
-- Saves sell orders for future restarts and wipes, based on the vending machine's relative position to the monument
+- Saves customizations for future restarts and wipes, based on the vending machine's relative position to the monument
 - Synchronizes orders with copies of the vending machines at duplicate monuments
 - Compatible with NPC vending machines spawned at monuments by plugins such as [Monument Addons](https://umod.org/plugins/monument-addons)
 - Supports items with custom skins and names
