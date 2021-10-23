@@ -46,9 +46,15 @@ When you open an NPC vending machine at a monument, if you have permission, you 
 }
 ```
 
-## Troubleshooting
+## FAQ
 
-If this plugin isn't detecting a monument vending machine, make sure it's an NPC vending machine, and that it is within the monument bounds as determined by [Monument Finder](https://umod.org/plugins/monument-finder). You can change the size of monument bounds using Monument Finder if needed.
+#### Can I sell more than 7 items?
+
+No. At most 7 items can be sold per vending machine. It's not possible to sell more due to UI limitations in the vanilla game.
+
+#### How do I setup custom monuments?
+
+As a prerequisite, the custom monument must use the monument marker prefab and have a unique name. Then, you must configure the monument's bounds in [Monument Finder](https://umod.org/plugins/monument-finder) to envelope the monument so that Custom Vending Setup can accurately determine whether a given vending machine is within that monument.
 
 ## Developer Hooks
 
