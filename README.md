@@ -1,3 +1,7 @@
+## Video tutorial
+
+[![Video Tutorial](https://img.youtube.com/vi/oiKKByGV_i0/mqdefault.jpg)](https://www.youtube.com/watch?v=oiKKByGV_i0)
+
 ## Features
 
 - Allows customizing items sold at monument vending machines
