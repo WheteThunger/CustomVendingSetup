@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using Oxide.Core;
 using Oxide.Core.Plugins;
@@ -15,7 +15,7 @@ using static VendingMachine;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.0.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.0.1")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -1681,6 +1681,18 @@ namespace Oxide.Plugins
                 [Lang.InfoShopName] = "NAME",
                 [Lang.ErrorCurrentlyBeingEdited] = "That vending machine is currently being edited by {0}.",
             }, this, "en");
+            //Added translation in portuguese brazil
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                [Lang.ButtonSave] = "SALVE",
+                [Lang.ButtonCancel] = "CANCELAR",
+                [Lang.ButtonEdit] = "EDITAR",
+                [Lang.ButtonReset] = "REDEFINIR",
+                [Lang.InfoForSale] = "À VENDA",
+                [Lang.InfoCost] = "CUSTO",
+                [Lang.InfoShopName] = "NOME",
+                [Lang.ErrorCurrentlyBeingEdited] = "Essa máquina de venda automática está sendo editada por {0}.",
+            }, this, "pt-BR");
         }
 
         #endregion
