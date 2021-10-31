@@ -85,7 +85,7 @@ namespace Oxide.Plugins
 
                         var vendingMachine = container.entityOwner as NPCVendingMachine;
                         if (vendingMachine != null)
-                            OnLootEntity(player, vendingMachine);
+                            OnOpenVendingShop(vendingMachine, player);
                     }
                 });
             }
@@ -134,7 +134,7 @@ namespace Oxide.Plugins
             _vendingMachineManager.OnVendingMachineKilled(vendingMachine);
         }
 
-        private void OnLootEntity(BasePlayer player, NPCVendingMachine vendingMachine)
+        private void OnOpenVendingShop(NPCVendingMachine vendingMachine, BasePlayer player)
         {
             var controller = _vendingMachineManager.GetController(vendingMachine);
             if (controller == null)
