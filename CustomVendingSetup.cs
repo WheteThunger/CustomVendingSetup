@@ -15,7 +15,7 @@ using static VendingMachine;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.0.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.0.1")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -1435,7 +1435,7 @@ namespace Oxide.Plugins
                         : item.info.itemid == ItemId;
 
                     if (itemMatches)
-                        count++;
+                        count += item.amount;
                 }
                 return count;
             }
