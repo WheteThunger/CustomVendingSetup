@@ -1264,12 +1264,7 @@ namespace Oxide.Plugins
                 }
             }
 
-            private void TimedRefill()
-            {
-                _pluginInstance?.TrackStart();
-                CustomRefill();
-                _pluginInstance?.TrackEnd();
-            }
+            private void TimedRefill() => CustomRefill();
 
             private void OnDestroy()
             {
