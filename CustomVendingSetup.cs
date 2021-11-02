@@ -1160,8 +1160,6 @@ namespace Oxide.Plugins
 
         private class VendingMachineComponent : EntityComponent<NPCVendingMachine>
         {
-            private const int MaxPurchasesToStock = 10;
-
             public static void AddToVendingMachine(NPCVendingMachine vendingMachine, VendingProfile profile) =>
                 vendingMachine.GetOrAddComponent<VendingMachineComponent>().AssignProfile(profile);
 
@@ -1242,7 +1240,7 @@ namespace Oxide.Plugins
 
                     var totalAmountOfItem = offer.SellItem.GetAmountInContainer(baseEntity.inventory);
                     var numPurchasesPossible = totalAmountOfItem / offer.SellItem.Amount;
-                    var refillNumberOfPurchases = MaxPurchasesToStock - numPurchasesPossible;
+                    var refillNumberOfPurchases = offer.RefillMax - numPurchasesPossible;
 
                     if (!maxRefill)
                         refillNumberOfPurchases = Mathf.Min(refillNumberOfPurchases, offer.RefillAmount);
@@ -1470,6 +1468,10 @@ namespace Oxide.Plugins
             [JsonProperty("RefillDelay", DefaultValueHandling = DefaultValueHandling.Ignore)]
             [DefaultValue(10f)]
             public float RefillDelay = 10;
+
+            [JsonProperty("RefillMax", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [DefaultValue(10)]
+            public int RefillMax = 10;
 
             private SellOrder _sellOrder;
             [JsonIgnore]
