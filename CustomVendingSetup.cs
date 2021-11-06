@@ -392,11 +392,11 @@ namespace Oxide.Plugins
 
         private static VendingOffer[] GetOffersFromVendingMachine(NPCVendingMachine vendingMachine)
         {
-            var vanillaOffers = vendingMachine.vendingOrders.orders;
-            var offers = new VendingOffer[vanillaOffers.Length];
+            var vanillaOffers = vendingMachine.sellOrders.sellOrders;
+            var offers = new VendingOffer[vanillaOffers.Count];
 
-            for (var i = 0; i < vanillaOffers.Length; i++)
-                offers[i] = VendingOffer.FromVanillaOrderEntry(vanillaOffers[i]);
+            for (var i = 0; i < offers.Length; i++)
+                offers[i] = VendingOffer.FromVanillaSellOrder(vanillaOffers[i]);
 
             return offers;
         }
@@ -1449,21 +1449,21 @@ namespace Oxide.Plugins
 
         private class VendingOffer
         {
-            public static VendingOffer FromVanillaOrderEntry(NPCVendingOrder.Entry entry)
+            public static VendingOffer FromVanillaSellOrder(SellOrder sellOrder)
             {
                 return new VendingOffer
                 {
                     SellItem = new VendingItem
                     {
-                        ShortName = entry.sellItem.shortname,
-                        Amount = entry.sellItemAmount,
-                        IsBlueprint = entry.sellItemAsBP,
+                        ShortName = ItemManager.FindItemDefinition(sellOrder.itemToSellID)?.shortname,
+                        Amount = sellOrder.itemToSellAmount,
+                        IsBlueprint = sellOrder.itemToSellIsBP,
                     },
                     CurrencyItem = new VendingItem
                     {
-                        ShortName = entry.currencyItem.shortname,
-                        Amount = entry.currencyAmount,
-                        IsBlueprint = entry.currencyAsBP,
+                        ShortName = ItemManager.FindItemDefinition(sellOrder.currencyID)?.shortname,
+                        Amount = sellOrder.currencyAmountPerItem,
+                        IsBlueprint = sellOrder.currencyIsBP,
                     },
                 };
             }
