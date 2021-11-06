@@ -180,6 +180,19 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region API
+
+        private bool API_IsCustomized(NPCVendingMachine vendingMachine)
+        {
+            var component = vendingMachine.GetComponent<VendingMachineComponent>();
+            if (component == null)
+                return false;
+
+            return component.Profile?.Offers != null;
+        }
+
+        #endregion
+
         #region Dependencies
 
         private bool CheckDependencies()
@@ -1166,7 +1179,7 @@ namespace Oxide.Plugins
             public static void RemoveFromVendingMachine(NPCVendingMachine vendingMachine) =>
                 DestroyImmediate(vendingMachine.GetComponent<VendingMachineComponent>());
 
-            private VendingProfile _profile;
+            public VendingProfile Profile { get; private set; }
             private float[] _refillTimes;
 
             private string _originalShopName;
@@ -1182,11 +1195,11 @@ namespace Oxide.Plugins
 
             private void AssignProfile(VendingProfile profile)
             {
-                _profile = profile;
-                if (_profile?.Offers == null)
+                Profile = profile;
+                if (Profile?.Offers == null)
                     return;
 
-                _refillTimes = new float[_profile.Offers.Length];
+                _refillTimes = new float[Profile.Offers.Length];
 
                 baseEntity.inventory.Clear();
                 ItemManager.DoRemoves();
@@ -1209,9 +1222,9 @@ namespace Oxide.Plugins
                     baseEntity.UpdateMapMarker();
                 }
 
-                for (var i = 0; i < _profile.Offers.Length && i < MaxVendingOffers; i++)
+                for (var i = 0; i < Profile.Offers.Length && i < MaxVendingOffers; i++)
                 {
-                    var offer = _profile.Offers[i];
+                    var offer = Profile.Offers[i];
                     if (!offer.IsValid)
                         continue;
 
@@ -1229,12 +1242,12 @@ namespace Oxide.Plugins
 
             private void CustomRefill(bool maxRefill = false)
             {
-                for (var i = 0; i < _profile.Offers.Length; i++)
+                for (var i = 0; i < Profile.Offers.Length; i++)
                 {
                     if (_refillTimes[i] > Time.realtimeSinceStartup)
                         continue;
 
-                    var offer = _profile.Offers[i];
+                    var offer = Profile.Offers[i];
                     if (!offer.IsValid)
                         continue;
 

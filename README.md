@@ -60,6 +60,16 @@ No. At most 7 items can be sold per vending machine. It's not possible to sell m
 
 As a prerequisite, the custom monument must use the monument marker prefab and have a unique name. Then, you must configure the monument's bounds in [Monument Finder](https://umod.org/plugins/monument-finder) to envelope the monument so that Custom Vending Setup can accurately determine whether a given vending machine is within that monument.
 
+## Developer API
+
+#### API_IsCustomized
+
+```csharp
+bool API_IsCustomized(NPCVendingMachine vendingMachine)
+```
+
+- Returns `true` if the vending machine has been customized by this plugin, else `false`.
+
 ## Developer Hooks
 
 #### OnCustomVendingSetup
