@@ -1202,8 +1202,14 @@ namespace Oxide.Plugins
                 _refillTimes = new float[Profile.Offers.Length];
 
                 var vendingMachine = baseEntity;
-                vendingMachine.inventory.Clear();
-                ItemManager.DoRemoves();
+
+                for (var i = vendingMachine.inventory.itemList.Count - 1; i >= 0; i--)
+                {
+                    var item = vendingMachine.inventory.itemList[i];
+                    item.RemoveFromContainer();
+                    item.Remove();
+                }
+
                 vendingMachine.ClearSellOrders();
 
                 if (_originalShopName == null)
