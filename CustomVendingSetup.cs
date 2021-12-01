@@ -1201,25 +1201,26 @@ namespace Oxide.Plugins
 
                 _refillTimes = new float[Profile.Offers.Length];
 
-                baseEntity.inventory.Clear();
+                var vendingMachine = baseEntity;
+                vendingMachine.inventory.Clear();
                 ItemManager.DoRemoves();
-                baseEntity.ClearSellOrders();
+                vendingMachine.ClearSellOrders();
 
                 if (_originalShopName == null)
-                    _originalShopName = baseEntity.shopName;
+                    _originalShopName = vendingMachine.shopName;
 
                 if (_originalBroadcast == null)
-                    _originalBroadcast = baseEntity.IsBroadcasting();
+                    _originalBroadcast = vendingMachine.IsBroadcasting();
 
                 if (!string.IsNullOrEmpty(profile.ShopName))
                 {
-                    baseEntity.shopName = profile.ShopName;
+                    vendingMachine.shopName = profile.ShopName;
                 }
 
-                if (baseEntity.IsBroadcasting() != profile.Broadcast)
+                if (vendingMachine.IsBroadcasting() != profile.Broadcast)
                 {
-                    baseEntity.SetFlag(VendingMachineFlags.Broadcasting, profile.Broadcast);
-                    baseEntity.UpdateMapMarker();
+                    vendingMachine.SetFlag(VendingMachineFlags.Broadcasting, profile.Broadcast);
+                    vendingMachine.UpdateMapMarker();
                 }
 
                 for (var i = 0; i < Profile.Offers.Length && i < MaxVendingOffers; i++)
@@ -1228,13 +1229,19 @@ namespace Oxide.Plugins
                     if (!offer.IsValid)
                         continue;
 
-                    baseEntity.AddSellOrder(
-                        offer.SellItem.ItemId,
-                        offer.SellItem.Amount,
-                        offer.CurrencyItem.ItemId,
-                        offer.CurrencyItem.Amount,
-                        baseEntity.GetBPState(offer.SellItem.IsBlueprint, offer.CurrencyItem.IsBlueprint)
-                    );
+                    var vendingOffer = new ProtoBuf.VendingMachine.SellOrder
+                    {
+                        ShouldPool = false,
+                        itemToSellID = offer.SellItem.ItemId,
+                        itemToSellAmount = offer.SellItem.Amount,
+                        itemToSellIsBP = offer.SellItem.IsBlueprint,
+                        currencyID = offer.CurrencyItem.ItemId,
+                        currencyAmountPerItem = offer.CurrencyItem.Amount,
+                        currencyIsBP = offer.CurrencyItem.IsBlueprint,
+                    };
+
+                    Interface.CallHook("OnAddVendingOffer", vendingMachine, vendingOffer);
+                    vendingMachine.sellOrders.sellOrders.Add(vendingOffer);
                 }
 
                 CustomRefill(maxRefill: true);
