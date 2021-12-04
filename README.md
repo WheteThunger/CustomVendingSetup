@@ -7,9 +7,9 @@
 - Allows customizing items sold at monument vending machines
 - Supports vanilla monuments, custom monuments, train tunnels, and underwater labs (via Monument Finder)
 - Saves customizations for future restarts and wipes, based on the vending machine's relative position to the monument
-- Synchronizes orders with copies of the vending machines at duplicate monuments
+- Synchronizes edits with copies of the vending machines at duplicate monuments
 - Compatible with NPC vending machines spawned at monuments by plugins such as [Monument Addons](https://umod.org/plugins/monument-addons)
-- Supports items with custom skins and names
+- Supports blueprints, as well as items with custom skins and names
 
 ## Required plugins
 
@@ -20,9 +20,10 @@
 When you open an NPC vending machine at a monument, if you have permission, you will see an edit button. Clicking that edit button will reveal a container UI where you can customize the vending machine.
 
 - Change which items are sold, and their prices, by adding and removing items from the container
-- Rearrange items in the container to determine their order in the shop view
+- Change display order by rearranging items in the container
+- Change stock settings by editing the note next to each item
 - Toggle whether the map marker is enabled by clicking on the broadcast icon (green = on, gray = off)
-- Change the shop name by clicking on the note and editing its contents (supports multiple lines)
+- Change the shop name by clicking on the bottom-right note and editing its contents (supports multiple lines)
 - Save the changes by clicking the "SAVE" button
 
 ## Permissions
@@ -33,7 +34,9 @@ When you open an NPC vending machine at a monument, if you have permission, you 
 
 ![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/ShopView.png)
 
-![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/ContainerView.png)
+![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/ContainerViewStock.png)
+
+![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/ContainerViewName.png)
 
 ## Localization
 
@@ -45,7 +48,10 @@ When you open an NPC vending machine at a monument, if you have permission, you 
   "Button.Reset": "RESET",
   "Info.ForSale": "FOR SALE",
   "Info.Cost": "COST",
-  "Info.Name": "NAME",
+  "Info.Settings": "SETTINGS",
+  "Settings.RefillMax": "Max Stock",
+  "Settings.RefillDelay": "Seconds Between Refills",
+  "Settings.RefillAmount": "Refill Amount",
   "Error.CurrentlyBeingEdited": "That vending machine is currently being edited by {0}."
 }
 ```

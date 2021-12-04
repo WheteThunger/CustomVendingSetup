@@ -15,7 +15,7 @@ using static VendingMachine;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.1.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.2.0")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -31,13 +31,12 @@ namespace Oxide.Plugins
 
         private const string StoragePrefab = "assets/prefabs/deployable/large wood storage/box.wooden.large.prefab";
 
-        private const int NoteItemId = 1414245162;
         private const int ItemsPerRow = 6;
 
         // Going over 7 causes offers to get cut off regardless of resolution.
         private const int MaxVendingOffers = 7;
 
-        private const int NoteSlot = 5;
+        private const int ShopNameNoteSlot = 29;
         private const int ContainerCapacity = 30;
         private const int MaxItemRows = ContainerCapacity / ItemsPerRow;
 
@@ -50,6 +49,7 @@ namespace Oxide.Plugins
         );
 
         private ItemDefinition _blueprintDefinition;
+        private ItemDefinition _noteItemDefinition;
         private bool _serverInitialized = false;
 
         #endregion
@@ -93,6 +93,7 @@ namespace Oxide.Plugins
             Subscribe(nameof(OnEntitySpawned));
 
             _blueprintDefinition = ItemManager.FindItemDefinition("blueprintbase");
+            _noteItemDefinition = ItemManager.FindItemDefinition("note");
             _serverInitialized = true;
         }
 
@@ -401,7 +402,7 @@ namespace Oxide.Plugins
             return offers;
         }
 
-        private static VendingOffer[] GetOffersFromContainer(ItemContainer container)
+        private static VendingOffer[] GetOffersFromContainer(BasePlayer player, ItemContainer container)
         {
             var offers = new List<VendingOffer>();
 
@@ -409,18 +410,15 @@ namespace Oxide.Plugins
             {
                 for (var rowIndex = 0; rowIndex < MaxItemRows; rowIndex++)
                 {
-                    var sellItemSlot = rowIndex * ItemsPerRow + columnIndex * 2;
+                    var sellItemSlot = rowIndex * ItemsPerRow + columnIndex * 3;
 
                     var sellItem = container.GetSlot(sellItemSlot);
                     var currencyItem = container.GetSlot(sellItemSlot + 1);
+                    var settingsItem = container.GetSlot(sellItemSlot + 2);
                     if (sellItem == null || currencyItem == null)
                         continue;
 
-                    offers.Add(new VendingOffer
-                    {
-                        SellItem = VendingItem.FromItem(sellItem),
-                        CurrencyItem = VendingItem.FromItem(currencyItem),
-                    });
+                    offers.Add(VendingOffer.FromItems(player, sellItem, currencyItem, settingsItem));
                 }
             }
 
@@ -455,10 +453,10 @@ namespace Oxide.Plugins
             if (orderIndex < MaxItemRows)
                 return orderIndex * ItemsPerRow;
 
-            return (orderIndex % MaxItemRows) * ItemsPerRow + 2;
+            return (orderIndex % MaxItemRows) * ItemsPerRow + 3;
         }
 
-        private static StorageContainer CreateOrdersContainer(VendingOffer[] vendingOffers, string shopName)
+        private static StorageContainer CreateOrdersContainer(BasePlayer player, VendingOffer[] vendingOffers, string shopName)
         {
             var containerEntity = CreateContainerEntity(StoragePrefab);
 
@@ -466,7 +464,7 @@ namespace Oxide.Plugins
             container.allowedContents = ItemContainer.ContentsType.Generic;
             container.capacity = ContainerCapacity;
 
-            for (var orderIndex = 0; orderIndex < vendingOffers.Length && orderIndex < 2 * MaxItemRows; orderIndex++)
+            for (var orderIndex = 0; orderIndex < vendingOffers.Length && orderIndex < 9; orderIndex++)
             {
                 var offer = vendingOffers[orderIndex];
                 var sellItem = offer.SellItem.Create();
@@ -489,12 +487,37 @@ namespace Oxide.Plugins
                     currencyItem.Remove();
             }
 
-            var noteItem = ItemManager.CreateByItemID(NoteItemId);
-            if (noteItem != null)
+            // Add 7 note items, so the user doesn't have to make them.
+            for (var orderIndex = 0; orderIndex < 7; orderIndex++)
             {
-                noteItem.text = shopName;
-                if (!noteItem.MoveToContainer(container, NoteSlot))
-                    noteItem.Remove();
+                var offer = vendingOffers.Length > orderIndex
+                    ? vendingOffers[orderIndex]
+                    : null;
+
+                var settingsItem = ItemManager.Create(_pluginInstance._noteItemDefinition);
+                if (settingsItem == null)
+                    continue;
+
+                var refillMaxLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillMax);
+                var refillDelayLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillDelay);
+                var refillAmountLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillAmount);
+
+                settingsItem.text = $"{refillMaxLabel}: {offer?.RefillMax ?? VendingOffer.DefaultRefillMax}"
+                    + $"\n{refillDelayLabel}: {offer?.RefillDelay ?? VendingOffer.DefaultRefillDelay}"
+                    + $"\n{refillAmountLabel}: {offer?.RefillAmount ?? VendingOffer.DefaultRefillAmount}";
+
+                var destinationSlot = OrderIndexToSlot(orderIndex);
+
+                if (!settingsItem.MoveToContainer(container, destinationSlot + 2))
+                    settingsItem.Remove();
+            }
+
+            var generalSettingsItem = ItemManager.Create(_pluginInstance._noteItemDefinition);
+            if (generalSettingsItem != null)
+            {
+                generalSettingsItem.text = shopName;
+                if (!generalSettingsItem.MoveToContainer(container, ShopNameNoteSlot))
+                    generalSettingsItem.Remove();
             }
 
             return containerEntity;
@@ -745,13 +768,14 @@ namespace Oxide.Plugins
 
                 var forSaleText = _pluginInstance.GetMessage(player, Lang.InfoForSale);
                 var costText = _pluginInstance.GetMessage(player, Lang.InfoCost);
-                var shopNameText = _pluginInstance.GetMessage(player, Lang.InfoShopName);
+                var settingsText = _pluginInstance.GetMessage(player, Lang.InfoSettings);
 
                 AddHeaderLabel(cuiElements, uiScale, 0, forSaleText);
                 AddHeaderLabel(cuiElements, uiScale, 1, costText);
-                AddHeaderLabel(cuiElements, uiScale, 2, forSaleText);
-                AddHeaderLabel(cuiElements, uiScale, 3, costText);
-                AddHeaderLabel(cuiElements, uiScale, 5, shopNameText);
+                AddHeaderLabel(cuiElements, uiScale, 2, settingsText);
+                AddHeaderLabel(cuiElements, uiScale, 3, forSaleText);
+                AddHeaderLabel(cuiElements, uiScale, 4, costText);
+                AddHeaderLabel(cuiElements, uiScale, 5, settingsText);
 
                 CreateUI(player, cuiElements);
             }
@@ -1085,10 +1109,10 @@ namespace Oxide.Plugins
                     _pluginData.VendingProfiles.Add(Profile);
                 }
 
-                Profile.Offers = GetOffersFromContainer(Container.inventory);
+                Profile.Offers = GetOffersFromContainer(EditorPlayer, Container.inventory);
                 Profile.Broadcast = EditFormState.Broadcast;
 
-                var updatedShopName = Container.inventory.GetSlot(NoteSlot)?.text.Trim();
+                var updatedShopName = Container.inventory.GetSlot(ShopNameNoteSlot)?.text.Trim();
                 if (!string.IsNullOrEmpty(updatedShopName))
                     Profile.ShopName = updatedShopName;
 
@@ -1121,7 +1145,7 @@ namespace Oxide.Plugins
 
                 var offers = Profile?.Offers ?? GetOffersFromVendingMachine(vendingMachine);
 
-                Container = CreateOrdersContainer(offers, vendingMachine.shopName);
+                Container = CreateOrdersContainer(player, offers, vendingMachine.shopName);
                 EditFormState = EditFormState.FromVendingMachine(vendingMachine);
                 Container.SendAsSnapshot(player.Connection);
                 Container.PlayerOpenLoot(player, Container.panelName, doPositionChecks: false);
@@ -1462,6 +1486,10 @@ namespace Oxide.Plugins
 
         private class VendingOffer
         {
+            public const int DefaultRefillMax = 10;
+            public const int DefaultRefillDelay = 10;
+            public const int DefaultRefillAmount = 1;
+
             public static VendingOffer FromVanillaSellOrder(SellOrder sellOrder)
             {
                 return new VendingOffer
@@ -1481,23 +1509,75 @@ namespace Oxide.Plugins
                 };
             }
 
+            public static VendingOffer FromItems(BasePlayer player, Item sellItem, Item currencyItem, Item settingsItem)
+            {
+                var offer = new VendingOffer
+                {
+                    SellItem = VendingItem.FromItem(sellItem),
+                    CurrencyItem = VendingItem.FromItem(currencyItem),
+                };
+
+                if (settingsItem != null)
+                {
+                    var refillMaxLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillMax);
+                    var refillDelayLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillDelay);
+                    var refillAmountLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillAmount);
+
+                    var settings = ParseSettingsItem(settingsItem);
+                    int refillMax, refillDelay, refillAmount;
+
+                    if (settings.TryGetValue(refillMaxLabel, out refillMax))
+                        offer.RefillMax = refillMax;
+
+                    if (settings.TryGetValue(refillDelayLabel, out refillDelay))
+                        offer.RefillDelay = refillDelay;
+
+                    if (settings.TryGetValue(refillAmountLabel, out refillAmount))
+                        offer.RefillAmount = refillAmount;
+                }
+
+                return offer;
+            }
+
+            private static Dictionary<string, int> ParseSettingsItem(Item settingsItem)
+            {
+                var dict = new Dictionary<string, int>();
+                if (string.IsNullOrEmpty(settingsItem.text))
+                    return dict;
+
+                foreach (var line in settingsItem.text.Split('\n'))
+                {
+                    var parts = line.Split(':');
+                    if (parts.Length < 2)
+                        continue;
+
+                    int value;
+                    if (!int.TryParse(parts[1], out value))
+                        continue;
+
+                    dict[parts[0].Trim()] = value;
+                }
+
+                return dict;
+            }
+
             [JsonProperty("SellItem")]
             public VendingItem SellItem;
 
             [JsonProperty("CurrencyItem")]
             public VendingItem CurrencyItem;
 
-            [JsonProperty("RefillAmount", DefaultValueHandling = DefaultValueHandling.Ignore)]
-            [DefaultValue(1)]
-            public int RefillAmount = 1;
+            [JsonProperty("RefillMax", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [DefaultValue(DefaultRefillMax)]
+            public int RefillMax = DefaultRefillMax;
 
             [JsonProperty("RefillDelay", DefaultValueHandling = DefaultValueHandling.Ignore)]
-            [DefaultValue(10f)]
-            public float RefillDelay = 10;
+            [DefaultValue(DefaultRefillDelay)]
+            public int RefillDelay = DefaultRefillDelay;
 
-            [JsonProperty("RefillMax", DefaultValueHandling = DefaultValueHandling.Ignore)]
-            [DefaultValue(10)]
-            public int RefillMax = 10;
+            [JsonProperty("RefillAmount", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [DefaultValue(DefaultRefillAmount)]
+            public int RefillAmount = DefaultRefillAmount;
 
             private SellOrder _sellOrder;
             [JsonIgnore]
@@ -1687,7 +1767,10 @@ namespace Oxide.Plugins
             public const string ButtonSave = "Button.Save";
             public const string ButtonCancel = "Button.Cancel";
             public const string InfoCost = "Info.Cost";
-            public const string InfoShopName = "Info.Name";
+            public const string InfoSettings = "Info.Settings";
+            public const string SettingsRefillMax = "Settings.RefillMax";
+            public const string SettingsRefillDelay = "Settings.RefillDelay";
+            public const string SettingsRefillAmount = "Settings.RefillAmount";
             public const string ErrorCurrentlyBeingEdited = "Error.CurrentlyBeingEdited";
         }
 
@@ -1701,7 +1784,10 @@ namespace Oxide.Plugins
                 [Lang.ButtonReset] = "RESET",
                 [Lang.InfoForSale] = "FOR SALE",
                 [Lang.InfoCost] = "COST",
-                [Lang.InfoShopName] = "NAME",
+                [Lang.InfoSettings] = "SETTINGS",
+                [Lang.SettingsRefillMax] = "Max Stock",
+                [Lang.SettingsRefillDelay] = "Seconds Between Refills",
+                [Lang.SettingsRefillAmount] = "Refill Amount",
                 [Lang.ErrorCurrentlyBeingEdited] = "That vending machine is currently being edited by {0}.",
             }, this, "en");
         }
