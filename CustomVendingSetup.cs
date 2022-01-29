@@ -1295,20 +1295,43 @@ namespace Oxide.Plugins
                     if (!maxRefill)
                         refillNumberOfPurchases = Mathf.Min(refillNumberOfPurchases, offer.RefillAmount);
 
-                    var refillAmount = refillNumberOfPurchases * offer.SellItem.Amount;
+                    var refillAmount = 0;
+
+                    try
+                    {
+                        refillAmount = checked(refillNumberOfPurchases * offer.SellItem.Amount);
+                    }
+                    catch (System.OverflowException ex)
+                    {
+                        _pluginInstance?.LogError($"Cannot multiply {refillNumberOfPurchases} by {offer.SellItem.Amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex.ToString());
+
+                        // Prevent further refills so it's more obvious that something is wrong.
+                        _refillTimes[i] = float.MaxValue;
+                        continue;
+                    }
+
                     if (refillAmount > 0)
                     {
                         baseEntity.transactionActive = true;
                         var item = offer.SellItem.Create(refillAmount);
                         if (item != null)
                         {
-                            if (!item.MoveToContainer(baseEntity.inventory))
+                            if (item.MoveToContainer(baseEntity.inventory))
+                            {
+                                _refillTimes[i] = Time.realtimeSinceStartup + offer.RefillDelay;
+                            }
+                            else
+                            {
                                 item.Remove();
+
+                                _pluginInstance?.LogError($"Unable to add {item.amount} {item.info.shortname} to vending machine during refill.");
+
+                                // Increase time to next refill to avoid spamming errors.
+                                _refillTimes[i] = Time.realtimeSinceStartup + Math.Max(60f, offer.RefillDelay);
+                            }
                         }
                         baseEntity.transactionActive = false;
                     }
-
-                    _refillTimes[i] = Time.realtimeSinceStartup + offer.RefillDelay;
                 }
             }
 
