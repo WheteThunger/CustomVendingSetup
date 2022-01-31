@@ -397,7 +397,10 @@ namespace Oxide.Plugins
             var offers = new VendingOffer[vanillaOffers.Count];
 
             for (var i = 0; i < offers.Length; i++)
-                offers[i] = VendingOffer.FromVanillaSellOrder(vanillaOffers[i]);
+            {
+                var manifestEntry = vendingMachine.vendingOrders.orders.ElementAtOrDefault(i);
+                offers[i] = VendingOffer.FromVanillaSellOrder(vanillaOffers[i], manifestEntry);
+            }
 
             return offers;
         }
@@ -1513,7 +1516,7 @@ namespace Oxide.Plugins
             public const int DefaultRefillDelay = 10;
             public const int DefaultRefillAmount = 1;
 
-            public static VendingOffer FromVanillaSellOrder(SellOrder sellOrder)
+            public static VendingOffer FromVanillaSellOrder(SellOrder sellOrder, NPCVendingOrder.Entry manifestEntry)
             {
                 return new VendingOffer
                 {
@@ -1529,6 +1532,7 @@ namespace Oxide.Plugins
                         Amount = sellOrder.currencyAmountPerItem,
                         IsBlueprint = sellOrder.currencyIsBP,
                     },
+                    RefillDelay = manifestEntry != null ? (int)manifestEntry.refillDelay : DefaultRefillDelay,
                 };
             }
 
