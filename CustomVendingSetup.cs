@@ -1567,7 +1567,7 @@ namespace Oxide.Plugins
             {
                 return IsBlueprint
                     ? item.info == _pluginInstance?._blueprintDefinition && item.blueprintTarget == ItemId
-                    : item.info.itemid == ItemId;
+                    : item.info.itemid == ItemId && item.skin == Skin && item.name == DisplayName;
             }
         }
 
