@@ -22,7 +22,7 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        private Plugin MonumentFinder, UIScaleManager;
+        private Plugin MonumentFinder;
 
         private static CustomVendingSetup _pluginInstance;
         private static SavedData _pluginData;
@@ -239,14 +239,6 @@ namespace Oxide.Plugins
 
         private MonumentAdapter GetMonumentAdapter(BaseEntity entity) =>
             GetMonumentAdapter(entity.transform.position);
-
-        private float GetPlayerUIScale(BasePlayer player)
-        {
-            var scaleResult = UIScaleManager?.Call("API_CheckPlayerUIInfo", player.UserIDString) as float[];
-            return scaleResult != null && scaleResult.Length >= 3
-                ? scaleResult[2]
-                : 1;
-        }
 
         #endregion
 
@@ -600,11 +592,9 @@ namespace Oxide.Plugins
             {
                 DestroyForPlayer(player);
 
-                var uiScale = _pluginInstance.GetPlayerUIScale(player);
-
                 var numSellOrders = vendingMachine.sellOrders?.sellOrders.Count ?? 0;
-                var offsetY = (136 + 74 * numSellOrders) * uiScale;
-                var offsetX = 192 * uiScale;
+                var offsetY = 136 + 74 * numSellOrders;
+                var offsetX = 192;
 
                 var cuiElements = new CuiElementContainer
                 {
@@ -630,12 +620,12 @@ namespace Oxide.Plugins
                 if (profile != null)
                 {
                     var resetButtonText = _pluginInstance.GetMessage(player, Lang.ButtonReset);
-                    AddVendingButton(cuiElements, uiScale, vendingMachineId, resetButtonText, UICommands.Reset, buttonIndex, UIConstants.ResetButtonColor, UIConstants.ResetButtonTextColor);
+                    AddVendingButton(cuiElements, vendingMachineId, resetButtonText, UICommands.Reset, buttonIndex, UIConstants.ResetButtonColor, UIConstants.ResetButtonTextColor);
                     buttonIndex++;
                 }
 
                 var editButtonText = _pluginInstance.GetMessage(player, Lang.ButtonEdit);
-                AddVendingButton(cuiElements, uiScale, vendingMachineId, editButtonText, UICommands.Edit, buttonIndex, UIConstants.SaveButtonColor, UIConstants.SaveButtonTextColor);
+                AddVendingButton(cuiElements, vendingMachineId, editButtonText, UICommands.Edit, buttonIndex, UIConstants.SaveButtonColor, UIConstants.SaveButtonTextColor);
 
                 CreateUI(player, cuiElements);
             }
@@ -645,10 +635,10 @@ namespace Oxide.Plugins
                 return UIConstants.PanelWidth - reverseButtonIndex * (UIConstants.ButtonWidth + UIConstants.ButtonHorizontalSpacing);
             }
 
-            private void AddVendingButton(CuiElementContainer cuiElements, float uiScale, uint vendingMachineId, string text, string subCommand, int reverseButtonIndex, string color, string textColor)
+            private void AddVendingButton(CuiElementContainer cuiElements, uint vendingMachineId, string text, string subCommand, int reverseButtonIndex, string color, string textColor)
             {
-                var xMax = GetButtonOffset(reverseButtonIndex) * uiScale;
-                var xMin = xMax - UIConstants.ButtonWidth * uiScale;
+                var xMax = GetButtonOffset(reverseButtonIndex);
+                var xMin = xMax - UIConstants.ButtonWidth;
 
                 cuiElements.Add(
                     new CuiButton
@@ -658,7 +648,7 @@ namespace Oxide.Plugins
                             Text = text,
                             Color = textColor,
                             Align = TextAnchor.MiddleCenter,
-                            FontSize = Convert.ToInt32(18 * uiScale),
+                            FontSize = 18,
                         },
                         Button =
                         {
@@ -671,7 +661,7 @@ namespace Oxide.Plugins
                             AnchorMin = "0 0",
                             AnchorMax = "0 0",
                             OffsetMin = $"{xMin} 0",
-                            OffsetMax = $"{xMax} {UIConstants.ButtonHeight * uiScale}",
+                            OffsetMax = $"{xMax} {UIConstants.ButtonHeight}",
                         },
                     },
                     UIName
@@ -712,10 +702,8 @@ namespace Oxide.Plugins
             {
                 DestroyForPlayer(player);
 
-                var uiScale = _pluginInstance.GetPlayerUIScale(player);
-
-                var offsetX = 192 * uiScale;
-                var offsetY = 139 * uiScale;
+                var offsetX = 192;
+                var offsetY = 139;
 
                 var cuiElements = new CuiElementContainer
                 {
@@ -726,8 +714,8 @@ namespace Oxide.Plugins
                             {
                                 AnchorMin = UIConstants.AnchorMin,
                                 AnchorMax = UIConstants.AnchorMax,
-                                OffsetMin = $"{offsetX} {offsetY + MaxItemRows * (UIConstants.ItemBoxSize + UIConstants.ItemSpacing) * uiScale}",
-                                OffsetMax = $"{offsetX} {offsetY + MaxItemRows * (UIConstants.ItemBoxSize + UIConstants.ItemSpacing) * uiScale}",
+                                OffsetMin = $"{offsetX} {offsetY + MaxItemRows * (UIConstants.ItemBoxSize + UIConstants.ItemSpacing)}",
+                                OffsetMax = $"{offsetX} {offsetY + MaxItemRows * (UIConstants.ItemBoxSize + UIConstants.ItemSpacing)}",
                             },
                         },
                         "Overlay",
@@ -740,11 +728,11 @@ namespace Oxide.Plugins
 
                 var vendingMachineId = vendingMachine.net.ID;
 
-                AddButton(cuiElements, uiScale, vendingMachineId, saveButtonText, UICommands.Save, 1, UIConstants.SaveButtonColor, UIConstants.SaveButtonTextColor);
-                AddButton(cuiElements, uiScale, vendingMachineId, cancelButtonText, UICommands.Cancel, 0, UIConstants.CancelButtonColor, UIConstants.CancelButtonTextColor);
-                AddBroadcastButton(cuiElements, uiScale, vendingMachine, uiState);
+                AddButton(cuiElements, vendingMachineId, saveButtonText, UICommands.Save, 1, UIConstants.SaveButtonColor, UIConstants.SaveButtonTextColor);
+                AddButton(cuiElements, vendingMachineId, cancelButtonText, UICommands.Cancel, 0, UIConstants.CancelButtonColor, UIConstants.CancelButtonTextColor);
+                AddBroadcastButton(cuiElements, vendingMachine, uiState);
 
-                var headerOffset = -6 * uiScale;
+                var headerOffset = -6;
 
                 cuiElements.Add(
                     new CuiElement
@@ -760,8 +748,8 @@ namespace Oxide.Plugins
                             {
                                 AnchorMin = UIConstants.AnchorMin,
                                 AnchorMax = UIConstants.AnchorMax,
-                                OffsetMin = $"0 {headerOffset - UIConstants.HeaderHeight * uiScale}",
-                                OffsetMax = $"{UIConstants.PanelWidth * uiScale} {headerOffset}",
+                                OffsetMin = $"0 {headerOffset - UIConstants.HeaderHeight}",
+                                OffsetMax = $"{UIConstants.PanelWidth} {headerOffset}",
                             }
                         },
                         Parent = UIName,
@@ -773,20 +761,20 @@ namespace Oxide.Plugins
                 var costText = _pluginInstance.GetMessage(player, Lang.InfoCost);
                 var settingsText = _pluginInstance.GetMessage(player, Lang.InfoSettings);
 
-                AddHeaderLabel(cuiElements, uiScale, 0, forSaleText);
-                AddHeaderLabel(cuiElements, uiScale, 1, costText);
-                AddHeaderLabel(cuiElements, uiScale, 2, settingsText);
-                AddHeaderLabel(cuiElements, uiScale, 3, forSaleText);
-                AddHeaderLabel(cuiElements, uiScale, 4, costText);
-                AddHeaderLabel(cuiElements, uiScale, 5, settingsText);
+                AddHeaderLabel(cuiElements, 0, forSaleText);
+                AddHeaderLabel(cuiElements, 1, costText);
+                AddHeaderLabel(cuiElements, 2, settingsText);
+                AddHeaderLabel(cuiElements, 3, forSaleText);
+                AddHeaderLabel(cuiElements, 4, costText);
+                AddHeaderLabel(cuiElements, 5, settingsText);
 
                 CreateUI(player, cuiElements);
             }
 
-            private void AddHeaderLabel(CuiElementContainer cuiElements, float uiScale, int index, string text)
+            private void AddHeaderLabel(CuiElementContainer cuiElements, int index, string text)
             {
-                float xMin = (6 + index * (UIConstants.ItemBoxSize + UIConstants.ItemSpacing)) * uiScale;
-                float xMax = xMin + UIConstants.ItemBoxSize * uiScale;
+                float xMin = 6 + index * (UIConstants.ItemBoxSize + UIConstants.ItemSpacing);
+                float xMax = xMin + UIConstants.ItemBoxSize;
 
                 cuiElements.Add(
                     new CuiLabel
@@ -796,25 +784,25 @@ namespace Oxide.Plugins
                             Text = text,
                             Color = UIConstants.CancelButtonTextColor,
                             Align = TextAnchor.MiddleCenter,
-                            FontSize = Convert.ToInt32(13 * uiScale),
+                            FontSize = 13,
                         },
                         RectTransform =
                         {
                             AnchorMin = "0 0",
                             AnchorMax = "0 0",
                             OffsetMin = $"{xMin} 0",
-                            OffsetMax = $"{xMax} {UIConstants.HeaderHeight * uiScale}",
+                            OffsetMax = $"{xMax} {UIConstants.HeaderHeight}",
                         }
                     },
                     TipUIName
                 );
             }
 
-            private void AddBroadcastButton(CuiElementContainer cuiElements, float uiScale, NPCVendingMachine vendingMachine, EditFormState uiState)
+            private void AddBroadcastButton(CuiElementContainer cuiElements, NPCVendingMachine vendingMachine, EditFormState uiState)
             {
-                var iconSize = UIConstants.ButtonHeight * uiScale;
+                var iconSize = UIConstants.ButtonHeight;
 
-                var xMax = GetButtonOffset(2) * uiScale;
+                var xMax = GetButtonOffset(2);
                 var xMin = xMax - iconSize;
 
                 cuiElements.Add(
@@ -832,7 +820,7 @@ namespace Oxide.Plugins
                                 AnchorMin = "0 0",
                                 AnchorMax = "0 0",
                                 OffsetMin = $"{xMin} 0",
-                                OffsetMax = $"{xMax} {UIConstants.ButtonHeight * uiScale}",
+                                OffsetMax = $"{xMax} {UIConstants.ButtonHeight}",
                             },
                         },
                         Parent = UIName,
@@ -868,9 +856,8 @@ namespace Oxide.Plugins
             {
                 DestroyForPlayer(player, BroadcastUIName);
 
-                var uiScale = _pluginInstance.GetPlayerUIScale(player);
                 var cuiElements = new CuiElementContainer();
-                AddBroadcastButton(cuiElements, uiScale, vendingMachine, uiState);
+                AddBroadcastButton(cuiElements, vendingMachine, uiState);
                 CuiHelper.AddUi(player, cuiElements);
             }
 
@@ -879,10 +866,10 @@ namespace Oxide.Plugins
                 return UIConstants.PanelWidth - buttonIndex * (UIConstants.ButtonWidth + UIConstants.ButtonHorizontalSpacing);
             }
 
-            private void AddButton(CuiElementContainer cuiElements, float uiScale, uint vendingMachineId, string text, string subCommand, int buttonIndex, string color, string textColor)
+            private void AddButton(CuiElementContainer cuiElements, uint vendingMachineId, string text, string subCommand, int buttonIndex, string color, string textColor)
             {
-                var xMax = GetButtonOffset(buttonIndex) * uiScale;
-                var xMin = xMax - UIConstants.ButtonWidth * uiScale;
+                var xMax = GetButtonOffset(buttonIndex);
+                var xMin = xMax - UIConstants.ButtonWidth;
 
                 cuiElements.Add(
                     new CuiButton
@@ -892,7 +879,7 @@ namespace Oxide.Plugins
                             Text = text,
                             Color = textColor,
                             Align = TextAnchor.MiddleCenter,
-                            FontSize = Convert.ToInt32(18 * uiScale),
+                            FontSize = 18,
                         },
                         Button =
                         {
@@ -905,7 +892,7 @@ namespace Oxide.Plugins
                             AnchorMin = "0 0",
                             AnchorMax = "0 0",
                             OffsetMin = $"{xMin} 0",
-                            OffsetMax = $"{xMax} {UIConstants.ButtonHeight * uiScale}",
+                            OffsetMax = $"{xMax} {UIConstants.ButtonHeight}",
                         },
                     },
                     UIName
