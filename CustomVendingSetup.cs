@@ -1280,23 +1280,51 @@ namespace Oxide.Plugins
                 CustomRefill(maxRefill: true);
             }
 
+            private void ScheduleRefill(int offerIndex, VendingOffer offer, int min = 0)
+            {
+                _refillTimes[offerIndex] = Time.realtimeSinceStartup + Math.Max(offer.RefillDelay, min);
+            }
+
+            private void ScheduleDelayedRefill(int offerIndex, VendingOffer offer)
+            {
+                ScheduleRefill(offerIndex, offer, 300);
+            }
+
+            private void StopRefilling(int offerIndex)
+            {
+                _refillTimes[offerIndex] = float.MaxValue;
+            }
+
             private void CustomRefill(bool maxRefill = false)
             {
-                for (var i = 0; i < Profile.Offers.Length; i++)
+                for (var offerIndex = 0; offerIndex < Profile.Offers.Length; offerIndex++)
                 {
-                    if (_refillTimes[i] > Time.realtimeSinceStartup)
+                    if (_refillTimes[offerIndex] > Time.realtimeSinceStartup)
+                    {
                         continue;
+                    }
 
-                    var offer = Profile.Offers[i];
-                    if (!offer.IsValid)
+                    var offer = Profile.Offers[offerIndex];
+                    if (!offer.IsValid || offer.SellItem.Amount <= 0 || offer.CurrencyItem.Amount <= 0)
+                    {
+                        StopRefilling(offerIndex);
                         continue;
+                    }
 
                     var totalAmountOfItem = offer.SellItem.GetAmountInContainer(baseEntity.inventory);
-                    var numPurchasesPossible = totalAmountOfItem / offer.SellItem.Amount;
-                    var refillNumberOfPurchases = offer.RefillMax - numPurchasesPossible;
+                    var numPurchasesInStock = totalAmountOfItem / offer.SellItem.Amount;
+                    var refillNumberOfPurchases = offer.RefillMax - numPurchasesInStock;
 
                     if (!maxRefill)
+                    {
                         refillNumberOfPurchases = Mathf.Min(refillNumberOfPurchases, offer.RefillAmount);
+                    }
+
+                    if (refillNumberOfPurchases <= 0)
+                    {
+                        ScheduleRefill(offerIndex, offer);
+                        continue;
+                    }
 
                     var refillAmount = 0;
 
@@ -1308,33 +1336,59 @@ namespace Oxide.Plugins
                     {
                         _pluginInstance?.LogError($"Cannot multiply {refillNumberOfPurchases} by {offer.SellItem.Amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex.ToString());
 
-                        // Prevent further refills so it's more obvious that something is wrong.
-                        _refillTimes[i] = float.MaxValue;
+                        // Prevent further refills to avoid spamming the console since this case cannot be fixed without editing the vending machine.
+                        StopRefilling(offerIndex);
                         continue;
                     }
 
-                    if (refillAmount > 0)
+                    // Always increase the quantity of an existing item if present, rather than creating a new item.
+                    // This is done to prevent ridiculous configurations from potentially filling up the vending machine with specific items.
+                    var existingItem = offer.SellItem.FindInContainer(baseEntity.inventory);
+                    if (existingItem != null)
                     {
-                        baseEntity.transactionActive = true;
-                        var item = offer.SellItem.Create(refillAmount);
-                        if (item != null)
+                        try
                         {
-                            if (item.MoveToContainer(baseEntity.inventory))
-                            {
-                                _refillTimes[i] = Time.realtimeSinceStartup + offer.RefillDelay;
-                            }
-                            else
-                            {
-                                item.Remove();
-
-                                _pluginInstance?.LogError($"Unable to add {item.amount} {item.info.shortname} to vending machine during refill.");
-
-                                // Increase time to next refill to avoid spamming errors.
-                                _refillTimes[i] = Time.realtimeSinceStartup + Math.Max(60f, offer.RefillDelay);
-                            }
+                            existingItem.amount = checked(existingItem.amount + refillAmount);
+                            existingItem.MarkDirty();
+                            ScheduleRefill(offerIndex, offer);
                         }
-                        baseEntity.transactionActive = false;
+                        catch (System.OverflowException ex)
+                        {
+                            _pluginInstance?.LogError($"Cannot add {refillAmount} to {existingItem.amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex.ToString());
+
+                            // Reduce refill rate to avoid spamming the console.
+                            ScheduleDelayedRefill(offerIndex, offer);
+                        }
+                        continue;
                     }
+
+                    var item = offer.SellItem.Create(refillAmount);
+                    if (item == null)
+                    {
+                        _pluginInstance?.LogError($"Unable to create item '{offer.SellItem.ShortName}'. Does that item exist? Was it removed from the game?");
+
+                        // Prevent further refills to avoid spamming the console since this case cannot be fixed without editing the vending machine.
+                        StopRefilling(offerIndex);
+                        continue;
+                    }
+
+                    baseEntity.transactionActive = true;
+
+                    if (item.MoveToContainer(baseEntity.inventory))
+                    {
+                        ScheduleRefill(offerIndex, offer);
+                    }
+                    else
+                    {
+                        _pluginInstance?.LogError($"Unable to add {item.amount} '{item.info.shortname}' because the vending machine container rejected it.");
+
+                        item.Remove();
+
+                        // Reduce refill rate to avoid spamming the console.
+                        ScheduleDelayedRefill(offerIndex, offer);
+                    }
+
+                    baseEntity.transactionActive = false;
                 }
             }
 
@@ -1494,19 +1548,39 @@ namespace Oxide.Plugins
 
             public Item Create() => Create(Amount);
 
+            public Item FindInContainer(ItemContainer container)
+            {
+                foreach (var item in container.itemList)
+                {
+                    if (DoesItemMatch(item))
+                    {
+                        return item;
+                    }
+                }
+
+                return null;
+            }
+
             public int GetAmountInContainer(ItemContainer container)
             {
                 var count = 0;
+
                 foreach (var item in container.itemList)
                 {
-                    var itemMatches = IsBlueprint
-                        ? item.info == _pluginInstance?._blueprintDefinition && item.blueprintTarget == ItemId
-                        : item.info.itemid == ItemId;
-
-                    if (itemMatches)
+                    if (DoesItemMatch(item))
+                    {
                         count += item.amount;
+                    }
                 }
+
                 return count;
+            }
+
+            private bool DoesItemMatch(Item item)
+            {
+                return IsBlueprint
+                    ? item.info == _pluginInstance?._blueprintDefinition && item.blueprintTarget == ItemId
+                    : item.info.itemid == ItemId;
             }
         }
 
