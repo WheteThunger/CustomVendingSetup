@@ -1543,7 +1543,7 @@ namespace Oxide.Plugins
 
                     baseEntity.transactionActive = true;
 
-                    if (item.MoveToContainer(baseEntity.inventory))
+                    if (item.MoveToContainer(baseEntity.inventory, allowStack: false))
                     {
                         ScheduleRefill(offerIndex, offer);
                     }
