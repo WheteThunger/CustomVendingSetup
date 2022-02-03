@@ -40,6 +40,9 @@ namespace Oxide.Plugins
         private const int ContainerCapacity = 30;
         private const int MaxItemRows = ContainerCapacity / ItemsPerRow;
 
+        private readonly object _boxedTrue = true;
+        private readonly object _boxedFalse = false;
+
         private VendingMachineManager _vendingMachineManager = new VendingMachineManager();
         private VendingUIManager _vendingUIManager = new VendingUIManager();
         private ContainerUIManager _containerUIManager = new ContainerUIManager();
@@ -179,6 +182,136 @@ namespace Oxide.Plugins
             }
         }
 
+        private object OnVendingTransaction(NPCVendingMachine vendingMachine, BasePlayer player, int sellOrderIndex, int numberOfTransactions, ItemContainer targetContainer)
+        {
+            // Only override transaction logic if the vending machine is customized by this plugin.
+            var vendingProfile = _vendingMachineManager.GetController(vendingMachine)?.Profile;
+            if (vendingProfile?.Offers == null)
+            {
+                return null;
+            }
+
+            var offer = vendingProfile.GetOfferForSellOrderIndex(sellOrderIndex);
+            if (offer == null)
+            {
+                return null;
+            }
+
+            // Get all item stacks in the vending machine that match the sold item.
+            var sellableItems = Facepunch.Pool.GetList<Item>();
+            var amountAvailable = 0;
+            offer.SellItem.FindAllInContainer(vendingMachine.inventory, sellableItems, ref amountAvailable);
+            if (sellableItems.Count == 0)
+            {
+                Facepunch.Pool.FreeList(ref sellableItems);
+                return _boxedFalse;
+            }
+
+            // Verify the vending machine has sufficient stock.
+            numberOfTransactions = Mathf.Clamp(numberOfTransactions, 1, sellableItems[0].hasCondition ? 1 : 1000000);
+            var amountRequested = offer.SellItem.Amount * numberOfTransactions;
+            if (amountRequested > amountAvailable)
+            {
+                Facepunch.Pool.FreeList(ref sellableItems);
+                return _boxedFalse;
+            }
+
+            // Get all item stacks in the player inventory that match the currency item.
+            var currencyItems = Facepunch.Pool.GetList<Item>();
+            var currencyAvailable = 0;
+            offer.CurrencyItem.FindAllInInventory(player.inventory, currencyItems, ref currencyAvailable);
+            if (currencyItems.Count == 0)
+            {
+                Facepunch.Pool.FreeList(ref sellableItems);
+                Facepunch.Pool.FreeList(ref currencyItems);
+                return _boxedFalse;
+            }
+
+            // Verify the player has enough currency.
+            var currencyRequired = offer.CurrencyItem.Amount * numberOfTransactions;
+            if (currencyAvailable < currencyRequired)
+            {
+                Facepunch.Pool.FreeList(ref sellableItems);
+                Facepunch.Pool.FreeList(ref currencyItems);
+                return _boxedFalse;
+            }
+
+            var marketTerminal = targetContainer?.entityOwner as MarketTerminal;
+
+            // Temporarily allow the vending machine internal storage to accept items.
+            // Currency items are temporarily added to the vending machine internal storage before deleting.
+            vendingMachine.transactionActive = true;
+
+            var currencyToTake = currencyRequired;
+
+            foreach (var currencyItem in currencyItems)
+            {
+                var amountToTake = Mathf.Min(currencyToTake, currencyItem.amount);
+                currencyToTake -= amountToTake;
+
+                var itemToTake = currencyItem.amount > amountToTake
+                    ? SplitItem(currencyItem, amountToTake)
+                    : currencyItem;
+
+                vendingMachine.TakeCurrencyItem(itemToTake);
+                marketTerminal?._onCurrencyRemovedCached?.Invoke(player, itemToTake);
+
+                if (currencyToTake <= 0)
+                {
+                    break;
+                }
+            }
+
+            vendingMachine.transactionActive = false;
+
+            Facepunch.Pool.FreeList(ref currencyItems);
+
+            var maxStackSize = sellableItems[0].MaxStackable();
+            var amountToGive = amountRequested;
+
+            foreach (var sellableItem in sellableItems)
+            {
+                while (amountToGive > maxStackSize && sellableItem.amount > maxStackSize)
+                {
+                    var itemToGive1 = SplitItem(sellableItem, maxStackSize);
+                    amountToGive -= itemToGive1.amount;
+
+                    object canPurchaseHookResult1 = CallHookCanPurchaseItem(player, itemToGive1, marketTerminal?._onItemPurchasedCached, vendingMachine, targetContainer);
+                    if (canPurchaseHookResult1 is bool)
+                    {
+                        Facepunch.Pool.FreeList(ref sellableItems);
+                        return canPurchaseHookResult1;
+                    }
+
+                    GiveSoldItem(vendingMachine, itemToGive1, player, marketTerminal, targetContainer);
+                }
+
+                var itemToGive2 = sellableItem.amount > amountToGive
+                    ? SplitItem(sellableItem, amountToGive)
+                    : sellableItem;
+
+                amountToGive -= itemToGive2.amount;
+
+                object canPurchaseHookResult2 = CallHookCanPurchaseItem(player, itemToGive2, marketTerminal?._onItemPurchasedCached, vendingMachine, targetContainer);
+                if (canPurchaseHookResult2 is bool)
+                {
+                    Facepunch.Pool.FreeList(ref sellableItems);
+                    return canPurchaseHookResult2;
+                }
+
+                GiveSoldItem(vendingMachine, itemToGive2, player, marketTerminal, targetContainer);
+
+                if (amountToGive <= 0)
+                {
+                    break;
+                }
+            }
+
+            Facepunch.Pool.FreeList(ref sellableItems);
+            vendingMachine.UpdateEmptyFlag();
+            return _boxedTrue;
+        }
+
         #endregion
 
         #region API
@@ -244,10 +377,15 @@ namespace Oxide.Plugins
 
         #region Exposed Hooks
 
-        private bool SetupVendingMachineWasBlocked(NPCVendingMachine vendingMachine)
+        private static bool SetupVendingMachineWasBlocked(NPCVendingMachine vendingMachine)
         {
             object hookResult = Interface.CallHook("OnCustomVendingSetup", vendingMachine);
             return hookResult is bool && (bool)hookResult == false;
+        }
+
+        private static object CallHookCanPurchaseItem(BasePlayer player, Item item, Action<BasePlayer, Item> onItemPurchased, NPCVendingMachine vendingMachine, ItemContainer targetContainer)
+        {
+            return Interface.CallHook("CanPurchaseItem", player, item, onItemPurchased, vendingMachine, targetContainer);
         }
 
         #endregion
@@ -371,6 +509,13 @@ namespace Oxide.Plugins
                 item.name = name;
 
             return item;
+        }
+
+        private static Item SplitItem(Item item, int amount)
+        {
+            var newItem = item.SplitItem(amount);
+            newItem.name = item.name;
+            return newItem;
         }
 
         private static void OpenVendingMachine(BasePlayer player, NPCVendingMachine vendingMachine)
@@ -516,6 +661,20 @@ namespace Oxide.Plugins
             }
 
             return containerEntity;
+        }
+
+        private static void GiveSoldItem(NPCVendingMachine vendingMachine, Item item, BasePlayer player, MarketTerminal marketTerminal, ItemContainer targetContainer)
+        {
+            if (targetContainer == null)
+            {
+                vendingMachine.GiveSoldItem(item, player);
+            }
+            else if (!item.MoveToContainer(targetContainer))
+            {
+                item.Drop(targetContainer.dropPosition, targetContainer.dropVelocity);
+            }
+
+            marketTerminal?._onItemPurchasedCached?.Invoke(player, item);
         }
 
         #endregion
@@ -980,7 +1139,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                if (_pluginInstance.SetupVendingMachineWasBlocked(vendingMachine))
+                if (SetupVendingMachineWasBlocked(vendingMachine))
                     return;
 
                 controller = EnsureControllerForLocation(location.Value);
@@ -1548,6 +1707,25 @@ namespace Oxide.Plugins
                 return null;
             }
 
+            public void FindAllInContainer(ItemContainer container, List<Item> resultItemList, ref int sum, float minCondition = 0)
+            {
+                foreach (var item in container.itemList)
+                {
+                    if (DoesItemMatch(item, minCondition))
+                    {
+                        resultItemList.Add(item);
+                        sum += item.amount;
+                    }
+                }
+            }
+
+            public void FindAllInInventory(PlayerInventory playerInventory, List<Item> resultItemList, ref int sum)
+            {
+                FindAllInContainer(playerInventory.containerMain, resultItemList, ref sum, minCondition: 0.5f);
+                FindAllInContainer(playerInventory.containerBelt, resultItemList, ref sum, minCondition: 0.5f);
+                FindAllInContainer(playerInventory.containerWear, resultItemList, ref sum, minCondition: 0.5f);
+            }
+
             public int GetAmountInContainer(ItemContainer container)
             {
                 var count = 0;
@@ -1563,11 +1741,34 @@ namespace Oxide.Plugins
                 return count;
             }
 
-            private bool DoesItemMatch(Item item)
+            private bool DoesItemMatch(Item item, float minCondition = 0)
             {
-                return IsBlueprint
-                    ? item.info == _pluginInstance?._blueprintDefinition && item.blueprintTarget == ItemId
-                    : item.info.itemid == ItemId && item.skin == Skin && item.name == DisplayName;
+                if (IsBlueprint)
+                {
+                    return item.info == _pluginInstance?._blueprintDefinition && item.blueprintTarget == ItemId;
+                }
+
+                if (item.info.itemid != ItemId)
+                {
+                    return false;
+                }
+
+                if (item.skin != Skin)
+                {
+                    return false;
+                }
+
+                if ((item.name ?? string.Empty) != (DisplayName ?? string.Empty))
+                {
+                    return false;
+                }
+
+                if (minCondition > 0 && item.hasCondition && (item.conditionNormalized < minCondition || item.maxConditionNormalized < minCondition))
+                {
+                    return false;
+                }
+
+                return true;
             }
         }
 
@@ -1731,6 +1932,25 @@ namespace Oxide.Plugins
 
             [JsonProperty("Offers")]
             public VendingOffer[] Offers;
+
+            public VendingOffer GetOfferForSellOrderIndex(int index)
+            {
+                var sellOrderIndex = 0;
+
+                for (var offerIndex = 0; offerIndex < Offers.Length; offerIndex++)
+                {
+                    var offer = Offers[offerIndex];
+                    if (!offer.IsValid)
+                        continue;
+
+                    if (sellOrderIndex == index)
+                        return offer;
+
+                    sellOrderIndex++;
+                }
+
+                return null;
+            }
 
             // IMonumentRelativePosition members.
             public string GetMonumentPrefabName() => Monument;
