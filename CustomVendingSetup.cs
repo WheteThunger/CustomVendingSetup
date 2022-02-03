@@ -22,7 +22,7 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        private Plugin MonumentFinder;
+        private Plugin MonumentFinder, VendingInStock;
 
         private static CustomVendingSetup _pluginInstance;
         private static SavedData _pluginData;
@@ -54,6 +54,7 @@ namespace Oxide.Plugins
         private ItemDefinition _blueprintDefinition;
         private ItemDefinition _noteItemDefinition;
         private bool _serverInitialized = false;
+        private bool _performingInstantRestock = false;
 
         #endregion
 
@@ -266,6 +267,13 @@ namespace Oxide.Plugins
 
             Facepunch.Pool.FreeList(ref currencyItems);
 
+            // Perform instant restock if VendingInStock is loaded, since we are replacing its behavior.
+            if (offer.RefillDelay == 0 || VendingInStock != null)
+            {
+                sellableItems[0].amount += amountRequested;
+                _performingInstantRestock = true;
+            }
+
             var maxStackSize = sellableItems[0].MaxStackable();
             var amountToGive = amountRequested;
 
@@ -307,9 +315,24 @@ namespace Oxide.Plugins
                 }
             }
 
+            _performingInstantRestock = false;
+
             Facepunch.Pool.FreeList(ref sellableItems);
             vendingMachine.UpdateEmptyFlag();
             return _boxedTrue;
+        }
+
+        // This hook is exposed by plugin: Vending In Stock (VendingInStock).
+        private object CanVendingStockRefill(NPCVendingMachine vendingMachine, Item soldItem, BasePlayer player)
+        {
+            // Prevent VendingInStock's refill logic while we are doing instant refill.
+            // Why? So we can simply increase the stack size of an existing item, to avoid over filling the container with items.
+            if (_performingInstantRestock)
+            {
+                return _boxedFalse;
+            }
+
+            return null;
         }
 
         #endregion
