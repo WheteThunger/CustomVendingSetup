@@ -1,4 +1,5 @@
 ﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Serialization;
 using Oxide.Core;
 using Oxide.Core.Plugins;
@@ -12,6 +13,9 @@ using UnityEngine;
 using VLB;
 using static ProtoBuf.VendingMachine;
 using static VendingMachine;
+
+using CustomGetDataCallback = System.Func<Newtonsoft.Json.Linq.JObject>;
+using CustomSaveDataCallback = System.Action<Newtonsoft.Json.Linq.JObject>;
 
 namespace Oxide.Plugins
 {
@@ -43,9 +47,10 @@ namespace Oxide.Plugins
         private readonly object _boxedTrue = true;
         private readonly object _boxedFalse = false;
 
-        private VendingMachineManager _vendingMachineManager = new VendingMachineManager();
+        private DataProviderRegistry _dataProviderRegistry = new DataProviderRegistry();
         private VendingUIManager _vendingUIManager = new VendingUIManager();
         private ContainerUIManager _containerUIManager = new ContainerUIManager();
+        private VendingMachineManager _vendingMachineManager;
 
         private DynamicHookSubscriber<ulong> _uiViewers = new DynamicHookSubscriber<ulong>(
             nameof(OnLootEntityEnd)
@@ -64,6 +69,8 @@ namespace Oxide.Plugins
         {
             _pluginInstance = this;
             _pluginData = SavedData.Load();
+
+            _vendingMachineManager = new VendingMachineManager(_dataProviderRegistry);
 
             permission.RegisterPermission(PermissionUse, this);
 
@@ -136,7 +143,7 @@ namespace Oxide.Plugins
 
         private void OnEntityKill(NPCVendingMachine vendingMachine)
         {
-            _vendingMachineManager.OnVendingMachineKilled(vendingMachine);
+            _vendingMachineManager.HandleVendingMachineKilled(vendingMachine);
         }
 
         private void OnOpenVendingShop(NPCVendingMachine vendingMachine, BasePlayer player)
@@ -178,7 +185,6 @@ namespace Oxide.Plugins
                 _containerUIManager.DestroyForPlayer(player);
                 _uiViewers.Remove(player.userID);
                 controller.OnContainerClosed();
-
                 return;
             }
         }
@@ -411,6 +417,11 @@ namespace Oxide.Plugins
             return Interface.CallHook("CanPurchaseItem", player, item, onItemPurchased, vendingMachine, targetContainer);
         }
 
+        private static Dictionary<string, object> CallHookDataProvider(NPCVendingMachine vendingMachine)
+        {
+            return Interface.CallHook("OnCustomVendingSetupDataProvider", vendingMachine) as Dictionary<string, object>;
+        }
+
         #endregion
 
         #region Commands
@@ -431,7 +442,7 @@ namespace Oxide.Plugins
                 return;
 
             NPCVendingMachine vendingMachine;
-            VendingController controller;
+            BaseVendingController controller;
             if (!PassesUICommandChecks(player, args, out vendingMachine, out controller))
                 return;
 
@@ -454,7 +465,7 @@ namespace Oxide.Plugins
                     break;
 
                 case UICommands.Reset:
-                    controller.ResetProfile();
+                    controller.HandleReset();
                     basePlayer.EndLooting();
 
                     OpenVendingMachineDelayed(basePlayer, vendingMachine);
@@ -466,7 +477,7 @@ namespace Oxide.Plugins
                     break;
 
                 case UICommands.Save:
-                    controller.SaveUpdates(vendingMachine);
+                    controller.HandleSave(vendingMachine);
                     OpenVendingMachineDelayed(basePlayer, vendingMachine);
                     break;
 
@@ -488,7 +499,7 @@ namespace Oxide.Plugins
                 && Math.Abs(a.z - b.z) < xZTolerance;
         }
 
-        private bool PassesUICommandChecks(IPlayer player, string[] args, out NPCVendingMachine vendingMachine, out VendingController controller)
+        private bool PassesUICommandChecks(IPlayer player, string[] args, out NPCVendingMachine vendingMachine, out BaseVendingController controller)
         {
             vendingMachine = null;
             controller = null;
@@ -1106,9 +1117,9 @@ namespace Oxide.Plugins
                 || AreVectorsClose(a.GetLegacyPosition(), b.GetLegacyPosition());
         }
 
-        private struct MonumentRelativePosition : IMonumentRelativePosition
+        private class MonumentRelativePosition : IMonumentRelativePosition
         {
-            public static MonumentRelativePosition? FromVendingMachine(NPCVendingMachine vendingMachine)
+            public static MonumentRelativePosition FromVendingMachine(NPCVendingMachine vendingMachine)
             {
                 var monument = _pluginInstance.GetMonumentAdapter(vendingMachine);
                 if (monument == null)
@@ -1135,59 +1146,199 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region Data Provider
+
+        private class DataProvider
+        {
+            public static DataProvider FromDictionary(Dictionary<string, object> spec)
+            {
+                var dataProvider = new DataProvider
+                {
+                    Spec = spec,
+                };
+
+                object getDataCallback, saveDataCallback;
+
+                if (spec.TryGetValue("GetData", out getDataCallback))
+                {
+                    dataProvider.GetDataCallback = getDataCallback as CustomGetDataCallback;
+                }
+
+                if (spec.TryGetValue("SaveData", out saveDataCallback))
+                {
+                    dataProvider.SaveDataCallback = saveDataCallback as CustomSaveDataCallback;
+                }
+
+                if (dataProvider.GetDataCallback == null)
+                {
+                    _pluginInstance.LogError("Data provider missing GetData");
+                    return null;
+                }
+
+                if (dataProvider.SaveDataCallback == null)
+                {
+                    _pluginInstance.LogError("Data provider missing SaveData");
+                    return null;
+                }
+
+                return dataProvider;
+            }
+
+            public Dictionary<string, object> Spec { get; private set; }
+            public CustomGetDataCallback GetDataCallback;
+            public CustomSaveDataCallback SaveDataCallback;
+
+            private VendingProfile _vendingProfile;
+            private JObject _serializedData;
+
+            public VendingProfile GetData()
+            {
+                if (_vendingProfile == null)
+                {
+                    _vendingProfile = GetDataCallback()?.ToObject<VendingProfile>();
+                }
+
+                if (_vendingProfile?.Offers == null)
+                {
+                    return null;
+                }
+
+                return _vendingProfile;
+            }
+
+            public void SaveData(VendingProfile vendingProfile)
+            {
+                _vendingProfile = vendingProfile;
+                SaveDataCallback(vendingProfile != null ? JObject.FromObject(vendingProfile) : null);
+            }
+        }
+
+        private class DataProviderRegistry
+        {
+            private Dictionary<Dictionary<string, object>, DataProvider> _dataProviderCache = new Dictionary<Dictionary<string, object>, DataProvider>();
+
+            public DataProvider Register(Dictionary<string, object> dataProviderSpec)
+            {
+                DataProvider dataProvider;
+                if (!_dataProviderCache.TryGetValue(dataProviderSpec, out dataProvider))
+                {
+                    dataProvider = DataProvider.FromDictionary(dataProviderSpec);
+                    if (dataProvider == null)
+                    {
+                        return null;
+                    }
+
+                    _dataProviderCache[dataProviderSpec] = dataProvider;
+                    return dataProvider;
+                }
+
+                return dataProvider;
+            }
+
+            public void Unregister(DataProvider dataProvider)
+            {
+                _dataProviderCache.Remove(dataProvider.Spec);
+            }
+        }
+
+        #endregion
+
         #region Vending Machine Manager
 
         private class VendingMachineManager
         {
-            // At most one controller is present per monument-relative position.
-            // For example, if there is a vending machine at each gas station at the same relative position, they use the same controller.
-            private HashSet<VendingController> _controllers = new HashSet<VendingController>();
+            private DataProviderRegistry _dataProviderRegistry;
+
+            private HashSet<BaseVendingController> _uniqueControllers = new HashSet<BaseVendingController>();
 
             // Controllers are also cached by vending machine, in case MonumentFinder is unloaded or becomes unstable.
-            private Dictionary<uint, VendingController> _controllersByVendingMachine = new Dictionary<uint, VendingController>();
+            private Dictionary<uint, BaseVendingController> _controllersByVendingMachine = new Dictionary<uint, BaseVendingController>();
+
+            private Dictionary<DataProvider, CustomVendingController> _controllersByDataProvider = new Dictionary<DataProvider, CustomVendingController>();
+
+            public VendingMachineManager(DataProviderRegistry dataProviderRegistry)
+            {
+                _dataProviderRegistry = dataProviderRegistry;
+            }
 
             public void OnVendingMachineSpawned(NPCVendingMachine vendingMachine)
             {
-                var controller = GetController(vendingMachine);
-                if (controller != null)
+                if (GetController(vendingMachine) != null)
                 {
-                    // A controller may already exist if this was called when handling a reload or late load of MonumentFinder.
+                    // A controller may already exist if this was called when handling a reload of MonumentFinder.
                     return;
                 }
 
-                var location = MonumentRelativePosition.FromVendingMachine(vendingMachine);
-                if (location == null)
+                BaseVendingController controller = null;
+
+                var dataProviderSpec = CallHookDataProvider(vendingMachine);
+                if (dataProviderSpec != null)
                 {
-                    // Not at a monument.
-                    return;
+                    var dataProvider = _dataProviderRegistry.Register(dataProviderSpec);
+                    if (dataProvider == null)
+                    {
+                        // Data provider is invalid.
+                        return;
+                    }
+
+                    if (SetupVendingMachineWasBlocked(vendingMachine))
+                    {
+                        return;
+                    }
+
+                    controller = EnsureCustomController(dataProvider);
+                }
+                else
+                {
+                    var location = MonumentRelativePosition.FromVendingMachine(vendingMachine);
+                    if (location == null)
+                    {
+                        // Not at a monument.
+                        return;
+                    }
+
+                    if (SetupVendingMachineWasBlocked(vendingMachine))
+                    {
+                        return;
+                    }
+
+                    controller = EnsureMonumentController(location);
                 }
 
-                if (SetupVendingMachineWasBlocked(vendingMachine))
-                    return;
-
-                controller = EnsureControllerForLocation(location.Value);
                 controller.AddVendingMachine(vendingMachine);
                 _controllersByVendingMachine[vendingMachine.net.ID] = controller;
             }
 
-            public void OnVendingMachineKilled(NPCVendingMachine vendingMachine)
+            public void HandleVendingMachineKilled(NPCVendingMachine vendingMachine)
             {
                 var controller = GetController(vendingMachine);
                 if (controller == null)
                     return;
 
                 controller.RemoveVendingMachine(vendingMachine);
+
+                if (!controller.HasVendingMachines)
+                {
+                    _uniqueControllers.Remove(controller);
+
+                    var customController = controller as CustomVendingController;
+                    if (customController != null)
+                    {
+                        _controllersByDataProvider.Remove(customController.DataProvider);
+                        _dataProviderRegistry.Unregister(customController.DataProvider);
+                    }
+                }
             }
 
-            public VendingController GetController(NPCVendingMachine vendingMachine)
+            public BaseVendingController GetController(NPCVendingMachine vendingMachine)
             {
-                VendingController controller;
+                BaseVendingController controller;
                 return _controllersByVendingMachine.TryGetValue(vendingMachine.net.ID, out controller)
                     ? controller
                     : null;
             }
 
-            public VendingController GetControllerByContainer(StorageContainer container)
+            public BaseVendingController GetControllerByContainer(StorageContainer container)
             {
                 foreach (var controller in _controllersByVendingMachine.Values)
                 {
@@ -1213,28 +1364,61 @@ namespace Oxide.Plugins
             public void ResetAll()
             {
                 foreach (var controller in _controllersByVendingMachine.Values)
-                    controller.ResetAll();
+                {
+                    controller.Destroy();
+                }
             }
 
-            private VendingController GetControllerByLocation(MonumentRelativePosition location)
+            private MonumentVendingController GetControllerByLocation(MonumentRelativePosition location)
             {
-                foreach (var controller in _controllers)
+                foreach (var controller in _uniqueControllers)
                 {
-                    if (LocationsMatch(controller.Location, location))
-                        return controller;
+                    var locationBasedController = controller as MonumentVendingController;
+                    if (locationBasedController == null)
+                    {
+                        continue;
+                    }
+
+                    if (LocationsMatch(locationBasedController.Location, location))
+                        return locationBasedController;
                 }
 
-                return  null;
+                return null;
             }
 
-            private VendingController EnsureControllerForLocation(MonumentRelativePosition location)
+            private MonumentVendingController EnsureMonumentController(MonumentRelativePosition location)
             {
                 var controller = GetControllerByLocation(location);
                 if (controller != null)
+                {
                     return controller;
+                }
 
-                controller = new VendingController(location);
-                _controllers.Add(controller);
+                controller = new MonumentVendingController(location);
+                _uniqueControllers.Add(controller);
+
+                return controller;
+            }
+
+            private CustomVendingController GetControllerByDataProvider(DataProvider dataProvider)
+            {
+                CustomVendingController controller;
+                return _controllersByDataProvider.TryGetValue(dataProvider, out controller)
+                    ? controller
+                    : null;
+            }
+
+            private CustomVendingController EnsureCustomController(DataProvider dataProvider)
+            {
+                var controller = GetControllerByDataProvider(dataProvider);
+                if (controller != null)
+                {
+                    return controller;
+                }
+
+                controller = new CustomVendingController(dataProvider);
+                _controllersByDataProvider[dataProvider] = controller;
+                _uniqueControllers.Add(controller);
 
                 return controller;
             }
@@ -1244,54 +1428,20 @@ namespace Oxide.Plugins
 
         #region Vending Machine Controller
 
-        private class VendingController
+        private abstract class BaseVendingController
         {
-            public MonumentRelativePosition Location { get; private set; }
-
             // While the Profile is null, the vending machines will be vanilla.
-            public VendingProfile Profile { get; private set; }
+            public VendingProfile Profile { get; protected set; }
 
             // These are temporary fields while the profile is being edited.
             public StorageContainer Container { get; private set; }
             public BasePlayer EditorPlayer { get; private set; }
             public EditFormState EditFormState { get; private set; }
 
+            public bool HasVendingMachines => _vendingMachineList.Count > 0;
+
             // List of vending machines with a position matching this controller.
             private HashSet<NPCVendingMachine> _vendingMachineList = new HashSet<NPCVendingMachine>();
-
-            public VendingController(MonumentRelativePosition location)
-            {
-                Location = location;
-                Profile = _pluginData.FindProfile(location);
-            }
-
-            public void ResetAll()
-            {
-                foreach (var vendingMachine in _vendingMachineList)
-                    VendingMachineComponent.RemoveFromVendingMachine(vendingMachine);
-
-                KillContainer();
-            }
-
-            public void SaveUpdates(NPCVendingMachine vendingMachine)
-            {
-                if (Profile == null)
-                {
-                    Profile = VendingProfile.FromVendingMachine(Location, vendingMachine);
-                    _pluginData.VendingProfiles.Add(Profile);
-                }
-
-                Profile.Offers = GetOffersFromContainer(EditorPlayer, Container.inventory);
-                Profile.Broadcast = EditFormState.Broadcast;
-
-                var updatedShopName = Container.inventory.GetSlot(ShopNameNoteSlot)?.text.Trim();
-                if (!string.IsNullOrEmpty(updatedShopName))
-                    Profile.ShopName = updatedShopName;
-
-                _pluginData.Save();
-
-                SetupAll();
-            }
 
             public void OnContainerClosed()
             {
@@ -1300,13 +1450,9 @@ namespace Oxide.Plugins
                 EditFormState = null;
             }
 
-            public void ResetProfile()
-            {
-                _pluginData.VendingProfiles.Remove(Profile);
-                Profile = null;
-                ResetAll();
-                _pluginData.Save();
-            }
+            protected abstract void SaveProfile(VendingProfile vendingProfile);
+
+            protected abstract void DeleteProfile(VendingProfile vendignProfile);
 
             public void StartEditing(BasePlayer player, NPCVendingMachine vendingMachine)
             {
@@ -1323,43 +1469,155 @@ namespace Oxide.Plugins
                 Container.PlayerOpenLoot(player, Container.panelName, doPositionChecks: false);
             }
 
-            public void AddVendingMachine(NPCVendingMachine vendingMachine)
+            public void HandleReset()
             {
-                if (!_vendingMachineList.Add(vendingMachine))
-                    return;
-
-                if (Profile != null)
-                    VendingMachineComponent.AddToVendingMachine(vendingMachine, Profile);
+                ResetVendingMachines();
+                DeleteProfile(Profile);
+                Profile = null;
+                KillContainer();
             }
 
-            public void RemoveVendingMachine(NPCVendingMachine vendingMachine)
+            public void Destroy()
             {
-                if (!_vendingMachineList.Remove(vendingMachine))
-                    return;
-
-                if (Profile != null)
-                    VendingMachineComponent.RemoveFromVendingMachine(vendingMachine);
-
-                if (_vendingMachineList.Count == 0 && EditorPlayer != null)
-                    EditorPlayer.EndLooting();
+                ResetVendingMachines();
+                KillContainer();
             }
 
-            private void SetupAll()
+            public void HandleSave(NPCVendingMachine vendingMachine)
             {
-                foreach (var vendingMachine in _vendingMachineList)
-                    VendingMachineComponent.AddToVendingMachine(vendingMachine, Profile);
+                if (Profile == null)
+                {
+                    Profile = GenerateProfile(vendingMachine);
+                }
+
+                Profile.Offers = GetOffersFromContainer(EditorPlayer, Container.inventory);
+                Profile.Broadcast = EditFormState.Broadcast;
+
+                var updatedShopName = Container.inventory.GetSlot(ShopNameNoteSlot)?.text.Trim();
+                if (!string.IsNullOrEmpty(updatedShopName))
+                {
+                    Profile.ShopName = updatedShopName;
+                }
+
+                SaveProfile(Profile);
+                SetupVendingMachines();
+            }
+
+            protected virtual VendingProfile GenerateProfile(NPCVendingMachine vendingMachine)
+            {
+                return VendingProfile.FromVendingMachine(vendingMachine);
             }
 
             private void KillContainer()
             {
                 if (Container == null || Container.IsDestroyed)
+                {
                     return;
+                }
 
                 if (EditorPlayer != null && EditorPlayer.IsConnected)
+                {
                     Container.OnNetworkSubscribersLeave(new List<Network.Connection> { EditorPlayer.Connection });
+                }
 
                 Container.Kill();
                 Container = null;
+            }
+
+            public void AddVendingMachine(NPCVendingMachine vendingMachine)
+            {
+                if (!_vendingMachineList.Add(vendingMachine))
+                {
+                    return;
+                }
+
+                if (Profile != null)
+                {
+                    VendingMachineComponent.AddToVendingMachine(vendingMachine, Profile);
+                }
+            }
+
+            public void RemoveVendingMachine(NPCVendingMachine vendingMachine)
+            {
+                if (!_vendingMachineList.Remove(vendingMachine))
+                {
+                    return;
+                }
+
+                if (_vendingMachineList.Count == 0 && EditorPlayer != null)
+                {
+                    EditorPlayer.EndLooting();
+                }
+            }
+
+            private void SetupVendingMachines()
+            {
+                foreach (var vendingMachine in _vendingMachineList)
+                {
+                    VendingMachineComponent.AddToVendingMachine(vendingMachine, Profile);
+                }
+            }
+
+            private void ResetVendingMachines()
+            {
+                foreach (var vendingMachine in _vendingMachineList)
+                {
+                    VendingMachineComponent.RemoveFromVendingMachine(vendingMachine);
+                }
+            }
+        }
+
+        private class CustomVendingController : BaseVendingController
+        {
+            public DataProvider DataProvider { get; private set; }
+
+            public CustomVendingController(DataProvider dataProvider)
+            {
+                DataProvider = dataProvider;
+                Profile = dataProvider.GetData();
+            }
+
+            protected override void SaveProfile(VendingProfile vendingProfile)
+            {
+                Profile = vendingProfile;
+                DataProvider.SaveData(vendingProfile);
+            }
+
+            protected override void DeleteProfile(VendingProfile vendignProfile)
+            {
+                DataProvider.SaveData(null);
+            }
+        }
+
+        private class MonumentVendingController : BaseVendingController
+        {
+            public MonumentRelativePosition Location { get; private set; }
+
+            public MonumentVendingController(MonumentRelativePosition location)
+            {
+                Location = location;
+                Profile = _pluginData.FindProfile(location);
+            }
+
+            protected override void SaveProfile(VendingProfile vendingProfile)
+            {
+                if (!_pluginData.VendingProfiles.Contains(vendingProfile))
+                {
+                    _pluginData.VendingProfiles.Add(vendingProfile);
+                }
+
+                _pluginData.Save();
+            }
+
+            protected override void DeleteProfile(VendingProfile vendignProfile)
+            {
+                _pluginData.VendingProfiles.Remove(vendignProfile);
+                _pluginData.Save();
+            }
+
+            protected override VendingProfile GenerateProfile(NPCVendingMachine vendingMachine)
+            {
+                return VendingProfile.FromVendingMachine(vendingMachine, Location);
             }
         }
 
@@ -1921,16 +2179,15 @@ namespace Oxide.Plugins
 
         private class VendingProfile : IMonumentRelativePosition
         {
-            public static VendingProfile FromVendingMachine(MonumentRelativePosition location, NPCVendingMachine vendingMachine)
+            public static VendingProfile FromVendingMachine(NPCVendingMachine vendingMachine, MonumentRelativePosition location = null)
             {
                 return new VendingProfile
                 {
-                    Monument = location.GetMonumentPrefabName(),
-                    MonumentAlias = location.GetMonumentAlias(),
-                    Position = location.GetPosition(),
                     ShopName = vendingMachine.shopName,
                     Broadcast = vendingMachine.IsBroadcasting(),
-                    Offers = GetOffersFromVendingMachine(vendingMachine),
+                    Monument = location?.GetMonumentPrefabName(),
+                    MonumentAlias = location?.GetMonumentAlias(),
+                    Position = location?.GetPosition() ?? Vector3.zero,
                 };
             }
 
@@ -1941,7 +2198,7 @@ namespace Oxide.Plugins
             [DefaultValue(true)]
             public bool Broadcast = true;
 
-            [JsonProperty("Monument")]
+            [JsonProperty("Monument", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public string Monument;
 
             [JsonProperty("MonumentAlias", DefaultValueHandling = DefaultValueHandling.Ignore)]
