@@ -354,6 +354,40 @@ namespace Oxide.Plugins
             return component.Profile?.Offers != null;
         }
 
+        // Undocumented. Intended for MonumentAddons migration to become a Data Provider.
+        private JObject API_MigrateVendingProfile(NPCVendingMachine vendingMachine)
+        {
+            var location = MonumentRelativePosition.FromVendingMachine(vendingMachine);
+            if (location == null)
+            {
+                // This can happen if a vending machine was moved outside a monument's bounds.
+                return null;
+            }
+
+            var vendingProfile = _pluginData.FindProfile(location);
+            if (vendingProfile == null)
+            {
+                return null;
+            }
+
+            JObject jObject;
+
+            try
+            {
+                jObject = JObject.FromObject(vendingProfile);
+            }
+            catch (Exception e)
+            {
+                LogError($"Unable to migrate vending profile\n{e}");
+                return null;
+            }
+
+            _pluginData.VendingProfiles.Remove(vendingProfile);
+            _pluginData.Save();
+
+            return jObject;
+        }
+
         #endregion
 
         #region Dependencies
@@ -2305,7 +2339,7 @@ namespace Oxide.Plugins
             public void Save() =>
                 Interface.Oxide.DataFileSystem.WriteObject<SavedData>(_pluginInstance.Name, this);
 
-            public VendingProfile FindProfile(MonumentRelativePosition location)
+            public VendingProfile FindProfile(IMonumentRelativePosition location)
             {
                 foreach (var profile in VendingProfiles)
                 {
