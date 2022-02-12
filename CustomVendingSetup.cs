@@ -31,6 +31,8 @@ namespace Oxide.Plugins
         private static CustomVendingSetup _pluginInstance;
         private static SavedData _pluginData;
 
+        private Configuration _pluginConfig;
+
         private const string PermissionUse = "customvendingsetup.use";
 
         private const string StoragePrefab = "assets/prefabs/deployable/large wood storage/box.wooden.large.prefab";
@@ -68,6 +70,7 @@ namespace Oxide.Plugins
         private void Init()
         {
             _pluginInstance = this;
+            _pluginConfig.Init(this);
             _pluginData = SavedData.Load();
 
             _vendingMachineManager = new VendingMachineManager(_dataProviderRegistry);
@@ -280,7 +283,7 @@ namespace Oxide.Plugins
                 _performingInstantRestock = true;
             }
 
-            var maxStackSize = sellableItems[0].MaxStackable();
+            var maxStackSize = _pluginConfig.GetItemMaxStackSize(sellableItems[0]);
             var amountToGive = amountRequested;
 
             foreach (var sellableItem in sellableItems)
@@ -2358,6 +2361,149 @@ namespace Oxide.Plugins
                 return null;
             }
         }
+
+        #endregion
+
+        #region Configuration
+
+        private class Configuration : SerializableConfiguration
+        {
+            [JsonProperty("Override item max stack sizes (shortname: amount)")]
+            public Dictionary<string, int> ItemStackSizeOverrides = new Dictionary<string, int>();
+
+            public void Init(CustomVendingSetup pluginInstance)
+            {
+                foreach (var entry in ItemStackSizeOverrides)
+                {
+                    if (ItemManager.FindItemDefinition(entry.Key) == null)
+                    {
+                        pluginInstance.LogError($"Invalid item in config: {entry.Key}");
+                        continue;
+                    }
+                }
+            }
+
+            public int GetItemMaxStackSize(Item item)
+            {
+                var maxStackSize = item.MaxStackable();
+
+                int overrideMaxStackSize;
+                if (ItemStackSizeOverrides.TryGetValue(item.info.shortname, out overrideMaxStackSize))
+                {
+                    maxStackSize = Math.Max(maxStackSize, overrideMaxStackSize);
+                }
+
+                return maxStackSize;
+            }
+        }
+
+        private Configuration GetDefaultConfig() => new Configuration();
+
+        #region Configuration Boilerplate
+
+        private class SerializableConfiguration
+        {
+            public string ToJson() => JsonConvert.SerializeObject(this);
+
+            public Dictionary<string, object> ToDictionary() => JsonHelper.Deserialize(ToJson()) as Dictionary<string, object>;
+        }
+
+        private static class JsonHelper
+        {
+            public static object Deserialize(string json) => ToObject(JToken.Parse(json));
+
+            private static object ToObject(JToken token)
+            {
+                switch (token.Type)
+                {
+                    case JTokenType.Object:
+                        return token.Children<JProperty>()
+                                    .ToDictionary(prop => prop.Name,
+                                                  prop => ToObject(prop.Value));
+
+                    case JTokenType.Array:
+                        return token.Select(ToObject).ToList();
+
+                    default:
+                        return ((JValue)token).Value;
+                }
+            }
+        }
+
+        private bool MaybeUpdateConfig(SerializableConfiguration config)
+        {
+            var currentWithDefaults = config.ToDictionary();
+            var currentRaw = Config.ToDictionary(x => x.Key, x => x.Value);
+            return MaybeUpdateConfigDict(currentWithDefaults, currentRaw);
+        }
+
+        private bool MaybeUpdateConfigDict(Dictionary<string, object> currentWithDefaults, Dictionary<string, object> currentRaw)
+        {
+            bool changed = false;
+
+            foreach (var key in currentWithDefaults.Keys)
+            {
+                object currentRawValue;
+                if (currentRaw.TryGetValue(key, out currentRawValue))
+                {
+                    var defaultDictValue = currentWithDefaults[key] as Dictionary<string, object>;
+                    var currentDictValue = currentRawValue as Dictionary<string, object>;
+
+                    if (defaultDictValue != null)
+                    {
+                        if (currentDictValue == null)
+                        {
+                            currentRaw[key] = currentWithDefaults[key];
+                            changed = true;
+                        }
+                        else if (MaybeUpdateConfigDict(defaultDictValue, currentDictValue))
+                            changed = true;
+                    }
+                }
+                else
+                {
+                    currentRaw[key] = currentWithDefaults[key];
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+
+        protected override void LoadDefaultConfig() => _pluginConfig = GetDefaultConfig();
+
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+            try
+            {
+                _pluginConfig = Config.ReadObject<Configuration>();
+                if (_pluginConfig == null)
+                {
+                    throw new JsonException();
+                }
+
+                if (MaybeUpdateConfig(_pluginConfig))
+                {
+                    LogWarning("Configuration appears to be outdated; updating and saving");
+                    SaveConfig();
+                }
+            }
+            catch (Exception e)
+            {
+                LogError(e.Message);
+                LogWarning($"Configuration file {Name}.json is invalid; using defaults");
+                LoadDefaultConfig();
+            }
+        }
+
+        protected override void SaveConfig()
+        {
+            Log($"Configuration changes saved to {Name}.json");
+            Config.WriteObject(_pluginConfig, true);
+        }
+
+        #endregion
 
         #endregion
 

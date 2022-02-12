@@ -38,6 +38,31 @@ When you open an NPC vending machine at a monument, if you have permission, you 
 
 ![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/ContainerViewName.png)
 
+## Configuration
+
+Default configuration:
+
+```json
+{
+  "Override item max stack sizes (shortname: amount)": {}
+}
+```
+
+- `Override item max stack sizes (shortname: amount)` -- This section allows you to override the max stack size that players can get when purchasing items, by item short name. This is intended to allow players to get larger stacks of items from vending machines than they could get from other sources.
+  - This feature only applies to vending machines customized by this plugin.
+  - This feature might not work with every stack size plugin. Worst case, editing these settings may have no effect.
+
+Example of overriding stack sizes:
+
+```json
+{
+  "Override item max stack sizes (shortname: amount)": {
+    "wood": 10000,
+    "stones": 5000
+  }
+}
+```
+
 ## Localization
 
 ```json
