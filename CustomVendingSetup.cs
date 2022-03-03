@@ -1922,6 +1922,11 @@ namespace Oxide.Plugins
 
             private void CustomRefill(bool maxRefill = false)
             {
+                if (baseEntity.IsDestroyed)
+                {
+                    return;
+                }
+
                 for (var offerIndex = 0; offerIndex < Profile.Offers.Length; offerIndex++)
                 {
                     if (_refillTimes[offerIndex] > Time.realtimeSinceStartup)
