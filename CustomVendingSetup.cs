@@ -378,6 +378,12 @@ namespace Oxide.Plugins
             return IsCustomized(vendingMachine);
         }
 
+        private void API_RefreshDataProvider(NPCVendingMachine vendingMachine)
+        {
+            _vendingMachineManager.HandleVendingMachineKilled(vendingMachine);
+            _vendingMachineManager.OnVendingMachineSpawned(vendingMachine);
+        }
+
         // Undocumented. Intended for MonumentAddons migration to become a Data Provider.
         private JObject API_MigrateVendingProfile(NPCVendingMachine vendingMachine)
         {
@@ -1514,6 +1520,7 @@ namespace Oxide.Plugins
                     return;
 
                 controller.RemoveVendingMachine(vendingMachine);
+                _controllersByVendingMachine.Remove(vendingMachine.net.ID);
 
                 if (!controller.HasVendingMachines)
                 {

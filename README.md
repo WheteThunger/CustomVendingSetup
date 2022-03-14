@@ -99,7 +99,15 @@ As a prerequisite, the custom monument must use the monument marker prefab and h
 bool API_IsCustomized(NPCVendingMachine vendingMachine)
 ```
 
-- Returns `true` if the vending machine has been customized by this plugin, else `false`.
+Returns `true` if the vending machine has been customized by this plugin, else `false`.
+
+#### API_RefreshDataProvider
+
+```csharp
+void API_RefreshDataProvider(NPCVendingMachine vendingMachine)
+```
+
+Removes the vending machine's currently assigned data provider and calls the `OnCustomVendingSetupDataProvider` hook again. If no plugin responds to that hook, the vending machine will fall back to using a monument based data provider.
 
 ## Developer Hooks
 
