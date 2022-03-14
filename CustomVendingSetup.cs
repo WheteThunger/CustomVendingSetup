@@ -19,7 +19,7 @@ using CustomSaveDataCallback = System.Action<Newtonsoft.Json.Linq.JObject>;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.4.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.5.0")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -230,7 +230,13 @@ namespace Oxide.Plugins
             var currencyItems = Facepunch.Pool.GetList<Item>();
             var currencyAvailable = 0;
             var currencyItemSpec = offer.CurrencyItem.GetItemSpec().Value;
-            currencyItemSpec.FindAllInInventory(player.inventory, currencyItems, ref currencyAvailable);
+            var currencyMatchOptions = MatchOptions.All;
+            if (currencyItemSpec.Skin == 0)
+            {
+                // Allow any skin to match if the currency item does not require a skin.
+                currencyMatchOptions &= ~MatchOptions.Skin;
+            }
+            currencyItemSpec.FindAllInInventory(player.inventory, currencyItems, ref currencyAvailable, currencyMatchOptions);
             if (currencyItems.Count == 0)
             {
                 Facepunch.Pool.FreeList(ref sellableItems);
@@ -1192,6 +1198,12 @@ namespace Oxide.Plugins
             public Vector3 GetLegacyPosition() => _legacyPosition;
         }
 
+        private enum MatchOptions
+        {
+            Skin = 1 << 0,
+            All = ~0,
+        }
+
         private struct ItemSpec
         {
             public static ItemSpec FromItem(Item item)
@@ -1265,7 +1277,7 @@ namespace Oxide.Plugins
                 return Create(amount);
             }
 
-            public bool Matches(Item item, float minCondition = 0)
+            public bool Matches(Item item, MatchOptions matchOptions = MatchOptions.All, float minCondition = 0)
             {
                 if (BlueprintTarget != 0)
                 {
@@ -1277,7 +1289,7 @@ namespace Oxide.Plugins
                     return false;
                 }
 
-                if (item.skin != Skin)
+                if ((matchOptions & MatchOptions.Skin) != 0 && item.skin != Skin)
                 {
                     return false;
                 }
@@ -1300,11 +1312,11 @@ namespace Oxide.Plugins
                 return true;
             }
 
-            public Item FirstInContainer(ItemContainer container)
+            public Item FirstInContainer(ItemContainer container, MatchOptions matchOptions = MatchOptions.All)
             {
                 foreach (var item in container.itemList)
                 {
-                    if (Matches(item))
+                    if (Matches(item, matchOptions))
                     {
                         return item;
                     }
@@ -1313,13 +1325,13 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            public int GetAmountInContainer(ItemContainer container)
+            public int GetAmountInContainer(ItemContainer container, MatchOptions matchOptions = MatchOptions.All)
             {
                 var count = 0;
 
                 foreach (var item in container.itemList)
                 {
-                    if (Matches(item))
+                    if (Matches(item, matchOptions))
                     {
                         count += item.amount;
                     }
@@ -1328,11 +1340,11 @@ namespace Oxide.Plugins
                 return count;
             }
 
-            public void FindAllInContainer(ItemContainer container, List<Item> resultItemList, ref int sum, float minCondition = 0)
+            public void FindAllInContainer(ItemContainer container, List<Item> resultItemList, ref int sum, MatchOptions matchOptions = MatchOptions.All, float minCondition = 0)
             {
                 foreach (var item in container.itemList)
                 {
-                    if (Matches(item, minCondition))
+                    if (Matches(item, matchOptions, minCondition))
                     {
                         resultItemList.Add(item);
                         sum += item.amount;
@@ -1340,11 +1352,11 @@ namespace Oxide.Plugins
                 }
             }
 
-            public void FindAllInInventory(PlayerInventory playerInventory, List<Item> resultItemList, ref int sum)
+            public void FindAllInInventory(PlayerInventory playerInventory, List<Item> resultItemList, ref int sum, MatchOptions matchOptions = MatchOptions.All)
             {
-                FindAllInContainer(playerInventory.containerMain, resultItemList, ref sum, minCondition: 0.5f);
-                FindAllInContainer(playerInventory.containerBelt, resultItemList, ref sum, minCondition: 0.5f);
-                FindAllInContainer(playerInventory.containerWear, resultItemList, ref sum, minCondition: 0.5f);
+                FindAllInContainer(playerInventory.containerMain, resultItemList, ref sum, matchOptions, minCondition: 0.5f);
+                FindAllInContainer(playerInventory.containerBelt, resultItemList, ref sum, matchOptions, minCondition: 0.5f);
+                FindAllInContainer(playerInventory.containerWear, resultItemList, ref sum, matchOptions, minCondition: 0.5f);
             }
         }
 
