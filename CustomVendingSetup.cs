@@ -51,17 +51,19 @@ namespace Oxide.Plugins
         private readonly object _boxedFalse = false;
 
         private DataProviderRegistry _dataProviderRegistry = new DataProviderRegistry();
-        private VendingUIManager _vendingUIManager = new VendingUIManager();
-        private ContainerUIManager _containerUIManager = new ContainerUIManager();
+        private ComponentTracker<NPCVendingMachine, VendingMachineComponent> _componentTracker = new ComponentTracker<NPCVendingMachine, VendingMachineComponent>();
+        private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
         private VendingMachineManager _vendingMachineManager;
-
-        private DynamicHookSubscriber<ulong> _uiViewers = new DynamicHookSubscriber<ulong>(
-            nameof(OnLootEntityEnd)
-        );
 
         private ItemDefinition _noteItemDefinition;
         private bool _serverInitialized = false;
         private bool _performingInstantRestock = false;
+
+        public CustomVendingSetup()
+        {
+            _componentFactory = new ComponentFactory<NPCVendingMachine, VendingMachineComponent>(_componentTracker);
+            _vendingMachineManager = new VendingMachineManager(_componentFactory, _dataProviderRegistry);
+        }
 
         #endregion
 
@@ -73,11 +75,7 @@ namespace Oxide.Plugins
             _pluginConfig.Init(this);
             _pluginData = SavedData.Load();
 
-            _vendingMachineManager = new VendingMachineManager(_dataProviderRegistry);
-
             permission.RegisterPermission(PermissionUse, this);
-
-            _uiViewers.UnsubscribeAll();
 
             Unsubscribe(nameof(OnEntitySpawned));
         }
@@ -112,9 +110,6 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
-            _vendingUIManager.DestroyForAllPlayers();
-            _containerUIManager.DestroyForAllPlayers();
-
             _vendingMachineManager.ResetAll();
 
             _pluginData = null;
@@ -154,40 +149,13 @@ namespace Oxide.Plugins
             if (controller == null)
                 return;
 
-            if (!permission.UserHasPermission(player.UserIDString, PermissionUse))
+            var component = _componentTracker.GetComponent(vendingMachine);
+            if (component == null)
                 return;
 
-            _vendingUIManager.ShowVendingUI(player, vendingMachine, controller.Profile);
-            _uiViewers.Add(player.userID);
-        }
-
-        private void OnLootEntityEnd(BasePlayer player, StorageContainer storageContainer)
-        {
-            var vendingMachine = storageContainer as NPCVendingMachine;
-            if (vendingMachine != null)
+            if (permission.UserHasPermission(player.UserIDString, PermissionUse))
             {
-                var controller = _vendingMachineManager.GetController(vendingMachine);
-                if (controller == null)
-                {
-                    // Not at a monument.
-                    return;
-                }
-
-                _vendingUIManager.DestroyForPlayer(player);
-                _uiViewers.Remove(player.userID);
-                return;
-            }
-
-            if (storageContainer.PrefabName == StoragePrefab)
-            {
-                var controller = _vendingMachineManager.GetControllerByContainer(storageContainer);
-                if (controller == null)
-                    return;
-
-                _containerUIManager.DestroyForPlayer(player);
-                _uiViewers.Remove(player.userID);
-                controller.OnContainerClosed();
-                return;
+                component.ShowAdminUI(player);
             }
         }
 
@@ -512,8 +480,8 @@ namespace Oxide.Plugins
                 return;
 
             NPCVendingMachine vendingMachine;
-            BaseVendingController controller;
-            if (!PassesUICommandChecks(player, args, out vendingMachine, out controller))
+            BaseVendingController vendingController;
+            if (!PassesUICommandChecks(player, args, out vendingMachine, out vendingController))
                 return;
 
             var basePlayer = player.Object as BasePlayer;
@@ -522,33 +490,32 @@ namespace Oxide.Plugins
             switch (subCommand)
             {
                 case UICommands.Edit:
-                    if (controller.EditorPlayer != null)
+                    if (vendingController.EditController != null)
                     {
-                        ChatMessage(basePlayer, Lang.ErrorCurrentlyBeingEdited, controller.EditorPlayer.displayName);
                         basePlayer.EndLooting();
+                        ChatMessage(basePlayer, Lang.ErrorCurrentlyBeingEdited, vendingController.EditController.EditorPlayer.displayName);
                         return;
                     }
 
-                    controller.StartEditing(basePlayer, vendingMachine);
-                    _containerUIManager.ShowContainerUI(basePlayer, vendingMachine, controller.EditFormState);
-                    _uiViewers.Add(basePlayer.userID);
+                    vendingController.StartEditing(basePlayer, vendingMachine);
                     break;
 
                 case UICommands.Reset:
-                    controller.HandleReset();
+                    vendingController.HandleReset();
+                    vendingMachine.FullUpdate();
                     basePlayer.EndLooting();
-
+                    basePlayer.inventory.loot.SendImmediate();
                     OpenVendingMachineDelayed(basePlayer, vendingMachine);
                     break;
 
                 case UICommands.ToggleBroadcast:
-                    controller.EditFormState.Broadcast = !controller.EditFormState.Broadcast;
-                    _containerUIManager.UpdateBroadcastUI(basePlayer, vendingMachine, controller.EditFormState);
+                    vendingController.EditController?.ToggleBroadcast();
                     break;
 
                 case UICommands.Save:
-                    controller.HandleSave(vendingMachine);
-                    OpenVendingMachineDelayed(basePlayer, vendingMachine);
+                    vendingController.HandleSave(vendingMachine);
+                    vendingMachine.FullUpdate();
+                    OpenVendingMachine(basePlayer, vendingMachine);
                     break;
 
                 case UICommands.Cancel:
@@ -751,11 +718,11 @@ namespace Oxide.Plugins
             return true;
         }
 
-        private void OpenVendingMachineDelayed(BasePlayer player, NPCVendingMachine vendingMachine, float delay = 0.25f)
+        private void OpenVendingMachineDelayed(BasePlayer player, NPCVendingMachine vendingMachine, float delay = 0.1f)
         {
             timer.Once(delay, () =>
             {
-                if (player == null || vendingMachine == null)
+                if (player == null || vendingMachine == null || vendingMachine.IsDestroyed)
                     return;
 
                 OpenVendingMachine(player, vendingMachine);
@@ -801,121 +768,6 @@ namespace Oxide.Plugins
             public const string AnchorMax = "0.5 0";
         }
 
-        private abstract class BaseUIManager
-        {
-            protected abstract string UIName { get; }
-
-            protected HashSet<BasePlayer> _viewingPlayers = new HashSet<BasePlayer>();
-
-            protected static void DestroyForPlayer(BasePlayer player, string uiName)
-            {
-                CuiHelper.DestroyUi(player, uiName);
-            }
-
-            public virtual void CreateUI(BasePlayer player, CuiElementContainer cuiElements)
-            {
-                _viewingPlayers.Add(player);
-                CuiHelper.AddUi(player, cuiElements);
-            }
-
-            public virtual void DestroyForPlayer(BasePlayer player)
-            {
-                if (_viewingPlayers.Remove(player))
-                    DestroyForPlayer(player, UIName);
-            }
-
-            public virtual void DestroyForAllPlayers()
-            {
-                foreach (var player in _viewingPlayers.ToArray())
-                    DestroyForPlayer(player);
-            }
-        }
-
-        private class VendingUIManager : BaseUIManager
-        {
-            protected override string UIName => "CustomVendingSetup.VendingUI";
-
-            public void ShowVendingUI(BasePlayer player, NPCVendingMachine vendingMachine, VendingProfile profile)
-            {
-                DestroyForPlayer(player);
-
-                var numSellOrders = vendingMachine.sellOrders?.sellOrders.Count ?? 0;
-                var offsetY = 136 + 74 * numSellOrders;
-                var offsetX = 192;
-
-                var cuiElements = new CuiElementContainer
-                {
-                    {
-                        new CuiPanel
-                        {
-                            RectTransform =
-                            {
-                                AnchorMin = UIConstants.AnchorMin,
-                                AnchorMax = UIConstants.AnchorMax,
-                                OffsetMin = $"{offsetX} {offsetY}",
-                                OffsetMax = $"{offsetX} {offsetY}",
-                            },
-                        },
-                        "Overlay",
-                        UIName
-                    }
-                };
-
-                var buttonIndex = 0;
-                var vendingMachineId = vendingMachine.net.ID;
-
-                if (profile != null)
-                {
-                    var resetButtonText = _pluginInstance.GetMessage(player, Lang.ButtonReset);
-                    AddVendingButton(cuiElements, vendingMachineId, resetButtonText, UICommands.Reset, buttonIndex, UIConstants.ResetButtonColor, UIConstants.ResetButtonTextColor);
-                    buttonIndex++;
-                }
-
-                var editButtonText = _pluginInstance.GetMessage(player, Lang.ButtonEdit);
-                AddVendingButton(cuiElements, vendingMachineId, editButtonText, UICommands.Edit, buttonIndex, UIConstants.SaveButtonColor, UIConstants.SaveButtonTextColor);
-
-                CreateUI(player, cuiElements);
-            }
-
-            private float GetButtonOffset(int reverseButtonIndex)
-            {
-                return UIConstants.PanelWidth - reverseButtonIndex * (UIConstants.ButtonWidth + UIConstants.ButtonHorizontalSpacing);
-            }
-
-            private void AddVendingButton(CuiElementContainer cuiElements, uint vendingMachineId, string text, string subCommand, int reverseButtonIndex, string color, string textColor)
-            {
-                var xMax = GetButtonOffset(reverseButtonIndex);
-                var xMin = xMax - UIConstants.ButtonWidth;
-
-                cuiElements.Add(
-                    new CuiButton
-                    {
-                        Text =
-                        {
-                            Text = text,
-                            Color = textColor,
-                            Align = TextAnchor.MiddleCenter,
-                            FontSize = 18,
-                        },
-                        Button =
-                        {
-                            Color = color,
-                            FadeIn = 0.1f,
-                            Command = $"customvendingsetup.ui {vendingMachineId} {subCommand}",
-                        },
-                        RectTransform =
-                        {
-                            AnchorMin = "0 0",
-                            AnchorMax = "0 0",
-                            OffsetMin = $"{xMin} 0",
-                            OffsetMax = $"{xMax} {UIConstants.ButtonHeight}",
-                        },
-                    },
-                    UIName
-                );
-            }
-        }
-
         private class EditFormState
         {
             public static EditFormState FromVendingMachine(NPCVendingMachine vendingMachine)
@@ -929,26 +781,15 @@ namespace Oxide.Plugins
             public bool Broadcast;
         }
 
-        private class ContainerUIManager : BaseUIManager
+        private static class ContainerUIRenderer
         {
-            protected override string UIName => "CustomVendingSetup.ContainerUI";
+            public const string UIName = "CustomVendingSetup.ContainerUI";
 
-            private const string TipUIName = "CustomVendingSetup.ContainerUI.Tip";
-            private const string BroadcastUIName = "CustomVendingSetup.ContainerUI.Broadcast";
+            public const string TipUIName = "CustomVendingSetup.ContainerUI.Tip";
+            public const string BroadcastUIName = "CustomVendingSetup.ContainerUI.Broadcast";
 
-            public override void DestroyForAllPlayers()
+            public static string RenderContainerUI(BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
             {
-                // Stop looting the edit containers since they are going to be removed.
-                foreach (var player in _viewingPlayers)
-                    player.EndLooting();
-
-                base.DestroyForAllPlayers();
-            }
-
-            public void ShowContainerUI(BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
-            {
-                DestroyForPlayer(player);
-
                 var offsetX = 192;
                 var offsetY = 139;
 
@@ -1015,10 +856,10 @@ namespace Oxide.Plugins
                 AddHeaderLabel(cuiElements, 4, costText);
                 AddHeaderLabel(cuiElements, 5, settingsText);
 
-                CreateUI(player, cuiElements);
+                return CuiHelper.ToJson(cuiElements);
             }
 
-            private void AddHeaderLabel(CuiElementContainer cuiElements, int index, string text)
+            private static void AddHeaderLabel(CuiElementContainer cuiElements, int index, string text)
             {
                 float xMin = 6 + index * (UIConstants.ItemBoxSize + UIConstants.ItemSpacing);
                 float xMax = xMin + UIConstants.ItemBoxSize;
@@ -1045,7 +886,7 @@ namespace Oxide.Plugins
                 );
             }
 
-            private void AddBroadcastButton(CuiElementContainer cuiElements, NPCVendingMachine vendingMachine, EditFormState uiState)
+            private static void AddBroadcastButton(CuiElementContainer cuiElements, NPCVendingMachine vendingMachine, EditFormState uiState)
             {
                 var iconSize = UIConstants.ButtonHeight;
 
@@ -1099,23 +940,104 @@ namespace Oxide.Plugins
                 );
             }
 
-            public void UpdateBroadcastUI(BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
+            public static string RenderBroadcastUI(BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
             {
-                DestroyForPlayer(player, BroadcastUIName);
-
                 var cuiElements = new CuiElementContainer();
                 AddBroadcastButton(cuiElements, vendingMachine, uiState);
-                CuiHelper.AddUi(player, cuiElements);
+                return CuiHelper.ToJson(cuiElements);
             }
 
-            private float GetButtonOffset(int buttonIndex)
+            private static float GetButtonOffset(int buttonIndex)
             {
                 return UIConstants.PanelWidth - buttonIndex * (UIConstants.ButtonWidth + UIConstants.ButtonHorizontalSpacing);
             }
 
-            private void AddButton(CuiElementContainer cuiElements, uint vendingMachineId, string text, string subCommand, int buttonIndex, string color, string textColor)
+            private static void AddButton(CuiElementContainer cuiElements, uint vendingMachineId, string text, string subCommand, int buttonIndex, string color, string textColor)
             {
                 var xMax = GetButtonOffset(buttonIndex);
+                var xMin = xMax - UIConstants.ButtonWidth;
+
+                cuiElements.Add(
+                    new CuiButton
+                    {
+                        Text =
+                        {
+                            Text = text,
+                            Color = textColor,
+                            Align = TextAnchor.MiddleCenter,
+                            FontSize = 18,
+                        },
+                        Button =
+                        {
+                            Color = color,
+                            FadeIn = 0.1f,
+                            Command = $"customvendingsetup.ui {vendingMachineId} {subCommand}",
+                        },
+                        RectTransform =
+                        {
+                            AnchorMin = "0 0",
+                            AnchorMax = "0 0",
+                            OffsetMin = $"{xMin} 0",
+                            OffsetMax = $"{xMax} {UIConstants.ButtonHeight}",
+                        },
+                    },
+                    UIName
+                );
+            }
+        }
+
+        private static class AdminUIRenderer
+        {
+            public const string UIName = "CustomVendingSetup.AdminUI";
+
+            public static string RenderAdminUI(BasePlayer player, NPCVendingMachine vendingMachine, VendingProfile profile)
+            {
+                var numSellOrders = vendingMachine.sellOrders?.sellOrders.Count ?? 0;
+                var offsetY = 136 + 74 * numSellOrders;
+                var offsetX = 192;
+
+                var cuiElements = new CuiElementContainer
+                {
+                    {
+                        new CuiPanel
+                        {
+                            RectTransform =
+                            {
+                                AnchorMin = UIConstants.AnchorMin,
+                                AnchorMax = UIConstants.AnchorMax,
+                                OffsetMin = $"{offsetX} {offsetY}",
+                                OffsetMax = $"{offsetX} {offsetY}",
+                            },
+                        },
+                        "Overlay",
+                        UIName
+                    }
+                };
+
+                var buttonIndex = 0;
+                var vendingMachineId = vendingMachine.net.ID;
+
+                if (profile != null)
+                {
+                    var resetButtonText = _pluginInstance.GetMessage(player, Lang.ButtonReset);
+                    AddVendingButton(cuiElements, vendingMachineId, resetButtonText, UICommands.Reset, buttonIndex, UIConstants.ResetButtonColor, UIConstants.ResetButtonTextColor);
+                    buttonIndex++;
+                }
+
+                var editButtonText = _pluginInstance.GetMessage(player, Lang.ButtonEdit);
+                AddVendingButton(cuiElements, vendingMachineId, editButtonText, UICommands.Edit, buttonIndex, UIConstants.SaveButtonColor, UIConstants.SaveButtonTextColor);
+
+                return CuiHelper.ToJson(cuiElements);
+            }
+
+            private static float GetButtonOffset(int reverseButtonIndex)
+            {
+                return UIConstants.PanelWidth - reverseButtonIndex * (UIConstants.ButtonWidth + UIConstants.ButtonHorizontalSpacing);
+            }
+
+            private static void AddVendingButton(CuiElementContainer cuiElements, uint vendingMachineId, string text, string subCommand, int reverseButtonIndex, string color, string textColor)
+            {
+                var xMax = GetButtonOffset(reverseButtonIndex);
                 var xMin = xMax - UIConstants.ButtonWidth;
 
                 cuiElements.Add(
@@ -1463,6 +1385,7 @@ namespace Oxide.Plugins
 
         private class VendingMachineManager
         {
+            ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
             private DataProviderRegistry _dataProviderRegistry;
 
             private HashSet<BaseVendingController> _uniqueControllers = new HashSet<BaseVendingController>();
@@ -1472,8 +1395,9 @@ namespace Oxide.Plugins
 
             private Dictionary<DataProvider, CustomVendingController> _controllersByDataProvider = new Dictionary<DataProvider, CustomVendingController>();
 
-            public VendingMachineManager(DataProviderRegistry dataProviderRegistry)
+            public VendingMachineManager(ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, DataProviderRegistry dataProviderRegistry)
             {
+                _componentFactory = componentFactory;
                 _dataProviderRegistry = dataProviderRegistry;
             }
 
@@ -1555,17 +1479,6 @@ namespace Oxide.Plugins
                     : null;
             }
 
-            public BaseVendingController GetControllerByContainer(StorageContainer container)
-            {
-                foreach (var controller in _controllersByVendingMachine.Values)
-                {
-                    if (controller.Container == container)
-                        return controller;
-                }
-
-                return null;
-            }
-
             public void SetupAll()
             {
                 foreach (var entity in BaseNetworkable.serverEntities)
@@ -1611,7 +1524,7 @@ namespace Oxide.Plugins
                     return controller;
                 }
 
-                controller = new MonumentVendingController(location);
+                controller = new MonumentVendingController(_componentFactory, location);
                 _uniqueControllers.Add(controller);
 
                 return controller;
@@ -1633,11 +1546,113 @@ namespace Oxide.Plugins
                     return controller;
                 }
 
-                controller = new CustomVendingController(dataProvider);
+                controller = new CustomVendingController(_componentFactory, dataProvider);
                 _controllersByDataProvider[dataProvider] = controller;
                 _uniqueControllers.Add(controller);
 
                 return controller;
+            }
+        }
+
+        #endregion
+
+        #region Edit Controller
+
+        private class EditContainerComponent : FacepunchBehaviour
+        {
+            public static void AddToContainer(StorageContainer container, EditController editController)
+            {
+                var component = container.GetOrAddComponent<EditContainerComponent>();
+                component._editController = editController;
+            }
+
+            private EditController _editController;
+
+            private void PlayerStoppedLooting(BasePlayer player)
+            {
+                _pluginInstance?.TrackStart();
+                _editController.HandlePlayerLootEnd(player);
+                _pluginInstance?.TrackEnd();
+            }
+        }
+
+        private class EditController
+        {
+            public BasePlayer EditorPlayer { get; private set; }
+
+            private BaseVendingController _vendingController;
+            private NPCVendingMachine _vendingMachine;
+            private StorageContainer _container;
+            private EditFormState _formState;
+
+            public EditController(BaseVendingController vendingController, NPCVendingMachine vendingMachine, BasePlayer editorPlayer)
+            {
+                _vendingController = vendingController;
+                _vendingMachine = vendingMachine;
+                EditorPlayer = editorPlayer;
+
+                var offers = vendingController.Profile?.Offers ?? GetOffersFromVendingMachine(vendingMachine);
+
+                _container = CreateOrdersContainer(editorPlayer, offers, vendingMachine.shopName);
+                _formState = EditFormState.FromVendingMachine(vendingMachine);
+                EditContainerComponent.AddToContainer(_container, this);
+                _container.SendAsSnapshot(editorPlayer.Connection);
+                _container.PlayerOpenLoot(editorPlayer, _container.panelName, doPositionChecks: false);
+
+                CuiHelper.AddUi(editorPlayer, ContainerUIRenderer.RenderContainerUI(editorPlayer, vendingMachine, _formState));
+            }
+
+            public void ToggleBroadcast()
+            {
+                _formState.Broadcast = !_formState.Broadcast;
+
+                CuiHelper.DestroyUi(EditorPlayer, ContainerUIRenderer.BroadcastUIName);
+                CuiHelper.AddUi(EditorPlayer, ContainerUIRenderer.RenderBroadcastUI(EditorPlayer, _vendingMachine, _formState));
+            }
+
+            public void ApplyStateTo(VendingProfile profile)
+            {
+                profile.Offers = GetOffersFromContainer(EditorPlayer, _container.inventory);
+                profile.Broadcast = _formState.Broadcast;
+
+                var updatedShopName = _container.inventory.GetSlot(ShopNameNoteSlot)?.text.Trim();
+                if (!string.IsNullOrEmpty(updatedShopName))
+                {
+                    profile.ShopName = updatedShopName;
+                }
+            }
+
+            public void HandlePlayerLootEnd(BasePlayer player)
+            {
+                Kill();
+            }
+
+            public void Kill()
+            {
+                DestroyUI();
+                KillContainer();
+                _vendingController.OnEditControllerKilled();
+            }
+
+            private void DestroyUI()
+            {
+                CuiHelper.DestroyUi(EditorPlayer, ContainerUIRenderer.UIName);
+            }
+
+            private void KillContainer()
+            {
+                if (_container == null || _container.IsDestroyed)
+                {
+                    return;
+                }
+
+                if (EditorPlayer != null && !EditorPlayer.IsDestroyed && EditorPlayer.IsConnected)
+                {
+                    _container.OnNetworkSubscribersLeave(new List<Network.Connection> { EditorPlayer.Connection });
+                }
+
+                _container.Kill();
+                _container = null;
             }
         }
 
@@ -1650,21 +1665,19 @@ namespace Oxide.Plugins
             // While the Profile is null, the vending machines will be vanilla.
             public VendingProfile Profile { get; protected set; }
 
-            // These are temporary fields while the profile is being edited.
-            public StorageContainer Container { get; private set; }
-            public BasePlayer EditorPlayer { get; private set; }
-            public EditFormState EditFormState { get; private set; }
+            // While the EditController is non-null, a player is editing the vending machine.
+            public EditController EditController { get; protected set; }
 
             public bool HasVendingMachines => _vendingMachineList.Count > 0;
 
             // List of vending machines with a position matching this controller.
             private HashSet<NPCVendingMachine> _vendingMachineList = new HashSet<NPCVendingMachine>();
 
-            public void OnContainerClosed()
+            private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
+
+            public BaseVendingController(ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory)
             {
-                KillContainer();
-                EditorPlayer = null;
-                EditFormState = null;
+                _componentFactory = componentFactory;
             }
 
             protected abstract void SaveProfile(VendingProfile vendingProfile);
@@ -1673,31 +1686,24 @@ namespace Oxide.Plugins
 
             public void StartEditing(BasePlayer player, NPCVendingMachine vendingMachine)
             {
-                if (Container != null)
+                if (EditController != null)
                     return;
 
-                EditorPlayer = player;
-
-                var offers = Profile?.Offers ?? GetOffersFromVendingMachine(vendingMachine);
-
-                Container = CreateOrdersContainer(player, offers, vendingMachine.shopName);
-                EditFormState = EditFormState.FromVendingMachine(vendingMachine);
-                Container.SendAsSnapshot(player.Connection);
-                Container.PlayerOpenLoot(player, Container.panelName, doPositionChecks: false);
+                EditController = new EditController(this, vendingMachine, player);
             }
 
             public void HandleReset()
             {
-                ResetVendingMachines();
                 DeleteProfile(Profile);
                 Profile = null;
-                KillContainer();
+                SetupVendingMachines();
+                EditController?.Kill();
             }
 
             public void Destroy()
             {
                 ResetVendingMachines();
-                KillContainer();
+                EditController?.Kill();
             }
 
             public void HandleSave(NPCVendingMachine vendingMachine)
@@ -1707,38 +1713,11 @@ namespace Oxide.Plugins
                     Profile = GenerateProfile(vendingMachine);
                 }
 
-                Profile.Offers = GetOffersFromContainer(EditorPlayer, Container.inventory);
-                Profile.Broadcast = EditFormState.Broadcast;
-
-                var updatedShopName = Container.inventory.GetSlot(ShopNameNoteSlot)?.text.Trim();
-                if (!string.IsNullOrEmpty(updatedShopName))
-                {
-                    Profile.ShopName = updatedShopName;
-                }
+                EditController.ApplyStateTo(Profile);
+                EditController.Kill();
 
                 SaveProfile(Profile);
                 SetupVendingMachines();
-            }
-
-            protected virtual VendingProfile GenerateProfile(NPCVendingMachine vendingMachine)
-            {
-                return VendingProfile.FromVendingMachine(vendingMachine);
-            }
-
-            private void KillContainer()
-            {
-                if (Container == null || Container.IsDestroyed)
-                {
-                    return;
-                }
-
-                if (EditorPlayer != null && EditorPlayer.IsConnected)
-                {
-                    Container.OnNetworkSubscribersLeave(new List<Network.Connection> { EditorPlayer.Connection });
-                }
-
-                Container.Kill();
-                Container = null;
             }
 
             public void AddVendingMachine(NPCVendingMachine vendingMachine)
@@ -1748,10 +1727,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                if (Profile != null)
-                {
-                    VendingMachineComponent.AddToVendingMachine(vendingMachine, Profile);
-                }
+                _componentFactory.GetOrAddTo(vendingMachine).AssignProfile(Profile);
             }
 
             public void RemoveVendingMachine(NPCVendingMachine vendingMachine)
@@ -1761,17 +1737,27 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                if (_vendingMachineList.Count == 0 && EditorPlayer != null)
+                if (_vendingMachineList.Count == 0)
                 {
-                    EditorPlayer.EndLooting();
+                    EditController?.Kill();
                 }
+            }
+
+            public void OnEditControllerKilled()
+            {
+                EditController = null;
+            }
+
+            protected virtual VendingProfile GenerateProfile(NPCVendingMachine vendingMachine)
+            {
+                return VendingProfile.FromVendingMachine(vendingMachine);
             }
 
             private void SetupVendingMachines()
             {
                 foreach (var vendingMachine in _vendingMachineList)
                 {
-                    VendingMachineComponent.AddToVendingMachine(vendingMachine, Profile);
+                    _componentFactory.GetOrAddTo(vendingMachine).AssignProfile(Profile);
                 }
             }
 
@@ -1788,7 +1774,8 @@ namespace Oxide.Plugins
         {
             public DataProvider DataProvider { get; private set; }
 
-            public CustomVendingController(DataProvider dataProvider)
+            public CustomVendingController(ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, DataProvider dataProvider)
+                : base(componentFactory)
             {
                 DataProvider = dataProvider;
                 Profile = dataProvider.GetData();
@@ -1810,7 +1797,8 @@ namespace Oxide.Plugins
         {
             public MonumentRelativePosition Location { get; private set; }
 
-            public MonumentVendingController(MonumentRelativePosition location)
+            public MonumentVendingController(ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, MonumentRelativePosition location)
+                : base(componentFactory)
             {
                 Location = location;
                 Profile = _pluginData.FindProfile(location);
@@ -1840,69 +1828,179 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region Component Tracker & Factory
+
+        private class ComponentTracker<THost, TGuest>
+            where THost : UnityEngine.Component
+            where TGuest : UnityEngine.Component
+        {
+            private readonly Dictionary<THost, TGuest> _hostToGuest = new Dictionary<THost, TGuest>();
+
+            public void RegisterComponent(THost host, TGuest guest)
+            {
+                _hostToGuest[host] = guest;
+            }
+
+            public TGuest GetComponent(THost host)
+            {
+                TGuest guest;
+                return _hostToGuest.TryGetValue(host, out guest)
+                    ? guest
+                    : null;
+            }
+
+            public void UnregisterComponent(THost source)
+            {
+                _hostToGuest.Remove(source);
+            }
+        }
+
+        private class TrackedComponent<THost, TGuest> : FacepunchBehaviour
+            where THost : UnityEngine.Component
+            where TGuest : TrackedComponent<THost, TGuest>
+        {
+            public ComponentTracker<THost, TGuest> ComponentTracker;
+
+            protected THost _host;
+
+            protected virtual void Awake()
+            {
+                _host = GetComponent<THost>();
+            }
+
+            protected virtual void OnDestroy()
+            {
+                ComponentTracker?.UnregisterComponent(_host);
+            }
+        }
+
+        private class ComponentFactory<THost, TGuest>
+            where THost : UnityEngine.Component
+            where TGuest : TrackedComponent<THost, TGuest>
+        {
+            private ComponentTracker<THost, TGuest> _componentTracker;
+
+            public ComponentFactory(ComponentTracker<THost, TGuest> componentTracker)
+            {
+                _componentTracker = componentTracker;
+            }
+
+            public TGuest GetOrAddTo(THost host)
+            {
+                var guest = _componentTracker.GetComponent(host);
+                if (guest == null)
+                {
+                    guest = host.gameObject.AddComponent<TGuest>();
+                    guest.ComponentTracker = _componentTracker;
+                    _componentTracker.RegisterComponent(host, guest);
+                }
+
+                return guest;
+            }
+        }
+
+        #endregion
+
         #region Vending Machine Component
 
-        private class VendingMachineComponent : EntityComponent<NPCVendingMachine>
+        private class VendingMachineComponent : TrackedComponent<NPCVendingMachine, VendingMachineComponent>
         {
-            public static void AddToVendingMachine(NPCVendingMachine vendingMachine, VendingProfile profile) =>
-                vendingMachine.GetOrAddComponent<VendingMachineComponent>().AssignProfile(profile);
-
             public static void RemoveFromVendingMachine(NPCVendingMachine vendingMachine) =>
                 DestroyImmediate(vendingMachine.GetComponent<VendingMachineComponent>());
 
             public VendingProfile Profile { get; private set; }
+
+            private readonly List<BasePlayer> _adminUIViewers = new List<BasePlayer>();
+            private NPCVendingMachine _vendingMachine;
             private float[] _refillTimes;
 
             private string _originalShopName;
             private bool? _originalBroadcast;
 
-            private void Awake()
+            public void ShowAdminUI(BasePlayer player)
             {
-                baseEntity.CancelInvoke(baseEntity.InstallFromVendingOrders);
-                baseEntity.CancelInvoke(baseEntity.Refill);
-
-                InvokeRandomized(TimedRefill, 1, 1, 0.1f);
+                _adminUIViewers.Add(player);
+                CuiHelper.DestroyUi(player, AdminUIRenderer.UIName);
+                CuiHelper.AddUi(player, AdminUIRenderer.RenderAdminUI(player, _vendingMachine, Profile));
             }
 
-            private void AssignProfile(VendingProfile profile)
+            protected override void Awake()
             {
+                base.Awake();
+                _vendingMachine = _host;
+            }
+
+            protected override void OnDestroy()
+            {
+                base.OnDestroy();
+
+                DestroyUIs();
+
+                if (Profile?.Offers != null && (_vendingMachine != null && !_vendingMachine.IsDestroyed))
+                {
+                    ResetToVanilla();
+                }
+            }
+
+            private void PlayerStoppedLooting(BasePlayer player)
+            {
+                _pluginInstance?.TrackStart();
+
+                if (_adminUIViewers.Remove(player))
+                {
+                    DestroyAdminUI(player);
+                }
+
+                _pluginInstance?.TrackEnd();
+            }
+
+            public void AssignProfile(VendingProfile profile)
+            {
+                if (Profile == null && profile != null)
+                {
+                    DisableVanillaBehavior();
+                }
+                else if (Profile != null && profile == null)
+                {
+                    ResetToVanilla();
+                }
+
                 Profile = profile;
-                if (Profile?.Offers == null)
+
+                if (profile?.Offers == null)
                     return;
 
                 _refillTimes = new float[Profile.Offers.Length];
 
-                var vendingMachine = baseEntity;
-
-                for (var i = vendingMachine.inventory.itemList.Count - 1; i >= 0; i--)
+                for (var i = _vendingMachine.inventory.itemList.Count - 1; i >= 0; i--)
                 {
-                    var item = vendingMachine.inventory.itemList[i];
+                    var item = _vendingMachine.inventory.itemList[i];
                     item.RemoveFromContainer();
                     item.Remove();
                 }
 
-                vendingMachine.ClearSellOrders();
+                _vendingMachine.ClearSellOrders();
 
                 if (_originalShopName == null)
-                    _originalShopName = vendingMachine.shopName;
+                    _originalShopName = _vendingMachine.shopName;
 
                 if (_originalBroadcast == null)
-                    _originalBroadcast = vendingMachine.IsBroadcasting();
+                    _originalBroadcast = _vendingMachine.IsBroadcasting();
 
                 if (!string.IsNullOrEmpty(profile.ShopName))
                 {
-                    vendingMachine.shopName = profile.ShopName;
+                    _vendingMachine.shopName = profile.ShopName;
                 }
 
-                if (vendingMachine.IsBroadcasting() != profile.Broadcast)
+                if (_vendingMachine.IsBroadcasting() != profile.Broadcast)
                 {
-                    vendingMachine.SetFlag(VendingMachineFlags.Broadcasting, profile.Broadcast);
-                    vendingMachine.UpdateMapMarker();
+                    _vendingMachine.SetFlag(VendingMachineFlags.Broadcasting, profile.Broadcast);
+                    _vendingMachine.UpdateMapMarker();
                 }
 
-                for (var i = 0; i < Profile.Offers.Length && i < MaxVendingOffers; i++)
+                for (var i = 0; i < profile.Offers.Length && i < MaxVendingOffers; i++)
                 {
-                    var offer = Profile.Offers[i];
+                    var offer = profile.Offers[i];
                     if (!offer.IsValid)
                         continue;
 
@@ -1917,8 +2015,8 @@ namespace Oxide.Plugins
                         currencyIsBP = offer.CurrencyItem.IsBlueprint,
                     };
 
-                    Interface.CallHook("OnAddVendingOffer", vendingMachine, vendingOffer);
-                    vendingMachine.sellOrders.sellOrders.Add(vendingOffer);
+                    Interface.CallHook("OnAddVendingOffer", _vendingMachine, vendingOffer);
+                    _vendingMachine.sellOrders.sellOrders.Add(vendingOffer);
                 }
 
                 CustomRefill(maxRefill: true);
@@ -1941,7 +2039,7 @@ namespace Oxide.Plugins
 
             private void CustomRefill(bool maxRefill = false)
             {
-                if (baseEntity.IsDestroyed)
+                if (_vendingMachine.IsDestroyed)
                 {
                     return;
                 }
@@ -1961,7 +2059,7 @@ namespace Oxide.Plugins
                     }
 
                     var itemSpec = offer.SellItem.GetItemSpec().Value;
-                    var totalAmountOfItem = itemSpec.GetAmountInContainer(baseEntity.inventory);
+                    var totalAmountOfItem = itemSpec.GetAmountInContainer(_vendingMachine.inventory);
                     var numPurchasesInStock = totalAmountOfItem / offer.SellItem.Amount;
                     var refillNumberOfPurchases = offer.RefillMax - numPurchasesInStock;
 
@@ -1993,7 +2091,7 @@ namespace Oxide.Plugins
 
                     // Always increase the quantity of an existing item if present, rather than creating a new item.
                     // This is done to prevent ridiculous configurations from potentially filling up the vending machine with specific items.
-                    var existingItem = itemSpec.FirstInContainer(baseEntity.inventory);
+                    var existingItem = itemSpec.FirstInContainer(_vendingMachine.inventory);
                     if (existingItem != null)
                     {
                         try
@@ -2022,9 +2120,9 @@ namespace Oxide.Plugins
                         continue;
                     }
 
-                    baseEntity.transactionActive = true;
+                    _vendingMachine.transactionActive = true;
 
-                    if (item.MoveToContainer(baseEntity.inventory, allowStack: false))
+                    if (item.MoveToContainer(_vendingMachine.inventory, allowStack: false))
                     {
                         ScheduleRefill(offerIndex, offer);
                     }
@@ -2038,69 +2136,50 @@ namespace Oxide.Plugins
                         ScheduleDelayedRefill(offerIndex, offer);
                     }
 
-                    baseEntity.transactionActive = false;
+                    _vendingMachine.transactionActive = false;
                 }
             }
 
             private void TimedRefill() => CustomRefill();
 
-            private void OnDestroy()
+            private void DestroyAdminUI(BasePlayer player)
             {
-                if (baseEntity == null || baseEntity.IsDestroyed)
-                    return;
+                CuiHelper.DestroyUi(player, AdminUIRenderer.UIName);
+            }
+
+            private void DestroyUIs()
+            {
+                foreach (var player in _adminUIViewers)
+                {
+                    DestroyAdminUI(player);
+                }
+            }
+
+            private void DisableVanillaBehavior()
+            {
+                _vendingMachine.CancelInvoke(_vendingMachine.InstallFromVendingOrders);
+                _vendingMachine.CancelInvoke(_vendingMachine.Refill);
+
+                InvokeRandomized(TimedRefill, 1, 1, 0.1f);
+            }
+
+            private void ResetToVanilla()
+            {
+                CancelInvoke(TimedRefill);
 
                 if (_originalShopName != null)
                 {
-                    baseEntity.shopName = _originalShopName;
+                    _vendingMachine.shopName = _originalShopName;
                 }
 
-                if (_originalBroadcast != null && _originalBroadcast != baseEntity.IsBroadcasting())
+                if (_originalBroadcast != null && _originalBroadcast != _vendingMachine.IsBroadcasting())
                 {
-                    baseEntity.SetFlag(VendingMachineFlags.Broadcasting, _originalBroadcast.Value);
-                    baseEntity.UpdateMapMarker();
+                    _vendingMachine.SetFlag(VendingMachineFlags.Broadcasting, _originalBroadcast.Value);
+                    _vendingMachine.UpdateMapMarker();
                 }
 
-                baseEntity.InstallFromVendingOrders();
-                baseEntity.InvokeRandomized(baseEntity.Refill, 1f, 1f, 0.1f);
-            }
-        }
-
-        #endregion
-
-        #region Dynamic Hook Subscriptions
-
-        private class DynamicHookSubscriber<T>
-        {
-            private HashSet<T> _list = new HashSet<T>();
-            private string[] _hookNames;
-
-            public DynamicHookSubscriber(params string[] hookNames)
-            {
-                _hookNames = hookNames;
-            }
-
-            public void Add(T item)
-            {
-                if (_list.Add(item) && _list.Count == 1)
-                    SubscribeAll();
-            }
-
-            public void Remove(T item)
-            {
-                if (_list.Remove(item) && _list.Count == 0)
-                    UnsubscribeAll();
-            }
-
-            public void SubscribeAll()
-            {
-                foreach (var hookName in _hookNames)
-                    _pluginInstance.Subscribe(hookName);
-            }
-
-            public void UnsubscribeAll()
-            {
-                foreach (var hookName in _hookNames)
-                    _pluginInstance.Unsubscribe(hookName);
+                _vendingMachine.InstallFromVendingOrders();
+                _vendingMachine.InvokeRandomized(_vendingMachine.Refill, 1f, 1f, 0.1f);
             }
         }
 
