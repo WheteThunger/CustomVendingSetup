@@ -97,7 +97,7 @@ namespace Oxide.Plugins
 
                         var vendingMachine = container.entityOwner as NPCVendingMachine;
                         if (vendingMachine != null)
-                            OnOpenVendingShop(vendingMachine, player);
+                            OnVendingShopOpened(vendingMachine, player);
                     }
                 });
             }
@@ -143,7 +143,7 @@ namespace Oxide.Plugins
             _vendingMachineManager.HandleVendingMachineKilled(vendingMachine);
         }
 
-        private void OnOpenVendingShop(NPCVendingMachine vendingMachine, BasePlayer player)
+        private void OnVendingShopOpened(NPCVendingMachine vendingMachine, BasePlayer player)
         {
             var controller = _vendingMachineManager.GetController(vendingMachine);
             if (controller == null)
@@ -542,7 +542,7 @@ namespace Oxide.Plugins
             {
                 vendingMachine.SendSellOrders(player);
                 vendingMachine.PlayerOpenLoot(player, vendingMachine.customerPanel);
-                Interface.CallHook("OnOpenVendingShop", vendingMachine, player);
+                Interface.CallHook(nameof(OnVendingShopOpened), vendingMachine, player);
             }
         }
 
