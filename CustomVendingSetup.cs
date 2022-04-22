@@ -538,7 +538,7 @@ namespace Oxide.Plugins
 
         private static void OpenVendingMachine(BasePlayer player, NPCVendingMachine vendingMachine)
         {
-            if (vendingMachine.OccupiedCheck(player))
+            if (vendingMachine.OccupiedCheck(player) && Interface.CallHook("OnVendingShopOpen", vendingMachine, player) == null)
             {
                 vendingMachine.SendSellOrders(player);
                 vendingMachine.PlayerOpenLoot(player, vendingMachine.customerPanel);
