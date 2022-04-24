@@ -1216,7 +1216,7 @@ namespace Oxide.Plugins
                     return false;
                 }
 
-                if ((item.name ?? string.Empty) != (Name ?? string.Empty))
+                if (!(item.name ?? string.Empty).Equals(Name ?? string.Empty, StringComparison.OrdinalIgnoreCase))
                 {
                     return false;
                 }
