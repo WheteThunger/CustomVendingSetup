@@ -1216,11 +1216,6 @@ namespace Oxide.Plugins
                     return false;
                 }
 
-                if (!(item.name ?? string.Empty).Equals(Name ?? string.Empty, StringComparison.OrdinalIgnoreCase))
-                {
-                    return false;
-                }
-
                 if (minCondition > 0 && item.hasCondition && (item.conditionNormalized < minCondition || item.maxConditionNormalized < minCondition))
                 {
                     return false;
