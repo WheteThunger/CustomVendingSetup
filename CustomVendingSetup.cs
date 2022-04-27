@@ -2335,7 +2335,7 @@ namespace Oxide.Plugins
                     AmmoAmount = itemSpec.AmmoAmount,
                     AmmoType = itemSpec.AmmoType?.shortname,
                     Position = itemSpec.Position,
-                    Capacity = itemSpec.Capacity,
+                    Capacity = itemSpec.Capacity > 0 && !itemDefinition.itemMods.Any(mod => mod is ItemModContainer) ? itemSpec.Capacity : 0,
                     Contents = SerializeContents(itemSpec.Contents),
                     _itemSpec = itemSpec,
                 };
