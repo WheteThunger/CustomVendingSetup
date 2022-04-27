@@ -1140,6 +1140,9 @@ namespace Oxide.Plugins
                     }
                 }
 
+                ItemDefinition ammoType;
+                var ammoAmount = GetAmmoAmountAndType(item, out ammoType);
+
                 return new ItemSpec
                 {
                     ItemId = item.info.itemid,
@@ -1148,10 +1151,36 @@ namespace Oxide.Plugins
                     Skin = item.skin,
                     DataInt = item.instanceData?.dataInt ?? 0,
                     Amount = item.amount,
+                    AmmoAmount = ammoAmount,
+                    AmmoType = ammoType,
                     Position = item.position,
                     Capacity = item.contents?.capacity ?? 0,
                     Contents = contents,
                 };
+            }
+
+            private static int GetAmmoAmountAndType(Item item, out ItemDefinition ammoType)
+            {
+                ammoType = null;
+
+                var heldEntity = item.GetHeldEntity();
+                if (heldEntity == null)
+                    return -1;
+
+                var baseProjectile = heldEntity as BaseProjectile;
+                if ((object)baseProjectile != null)
+                {
+                    ammoType = baseProjectile.primaryMagazine?.ammoType;
+                    return baseProjectile.primaryMagazine?.contents ?? 0;
+                }
+
+                var flameThrower = heldEntity as FlameThrower;
+                if ((object)flameThrower != null)
+                {
+                    return flameThrower.ammo;
+                }
+
+                return -1;
             }
 
             public int ItemId;
@@ -1160,6 +1189,8 @@ namespace Oxide.Plugins
             public ulong Skin;
             public int DataInt;
             public int Amount;
+            public int AmmoAmount;
+            public ItemDefinition AmmoType;
             public int Position;
             public int Capacity;
             public List<ItemSpec> Contents;
@@ -1223,6 +1254,34 @@ namespace Oxide.Plugins
                         {
                             childItem.Remove();
                         }
+                    }
+                }
+
+                var heldEntity = item.GetHeldEntity();
+                if (heldEntity != null)
+                {
+                    var baseProjectile = heldEntity as BaseProjectile;
+                    if ((object)baseProjectile != null)
+                    {
+                        var magazine = baseProjectile.primaryMagazine;
+                        if (magazine != null)
+                        {
+                            if (AmmoAmount >= 0)
+                            {
+                                magazine.contents = AmmoAmount;
+                            }
+
+                            if (AmmoType != null)
+                            {
+                                magazine.ammoType = AmmoType;
+                            }
+                        }
+                    }
+
+                    var flameThrower = heldEntity as FlameThrower;
+                    if ((object)flameThrower != null)
+                    {
+                        flameThrower.ammo = AmmoAmount;
                     }
                 }
 
@@ -2273,6 +2332,8 @@ namespace Oxide.Plugins
                     Skin = itemSpec.Skin,
                     IsBlueprint = isBlueprint,
                     DataInt = itemSpec.DataInt,
+                    AmmoAmount = itemSpec.AmmoAmount,
+                    AmmoType = itemSpec.AmmoType?.shortname,
                     Position = itemSpec.Position,
                     Capacity = itemSpec.Capacity,
                     Contents = SerializeContents(itemSpec.Contents),
@@ -2338,6 +2399,13 @@ namespace Oxide.Plugins
             [JsonProperty("Position", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public int Position;
 
+            [JsonProperty("Ammo", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [DefaultValue(-1)]
+            public int AmmoAmount = -1;
+
+            [JsonProperty("AmmoType", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public string AmmoType;
+
             [JsonProperty("Capacity", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public int Capacity;
 
@@ -2365,6 +2433,8 @@ namespace Oxide.Plugins
                             Skin = Skin,
                             DataInt = DataInt,
                             Amount = Amount,
+                            AmmoAmount = AmmoAmount,
+                            AmmoType = AmmoType != null ? ItemManager.FindItemDefinition(AmmoType) : null,
                             Position = Position,
                             Capacity = Capacity,
                             Contents = DeserializeContents(Contents)
