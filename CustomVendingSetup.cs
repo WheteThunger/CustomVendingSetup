@@ -1130,6 +1130,16 @@ namespace Oxide.Plugins
         {
             public static ItemSpec FromItem(Item item)
             {
+                List<ItemSpec> contents = null;
+                if (item.contents != null && item.contents.itemList.Count > 0)
+                {
+                    contents = new List<ItemSpec>(item.contents.itemList.Count);
+                    foreach (var childItem in item.contents.itemList)
+                    {
+                        contents.Add(ItemSpec.FromItem(childItem));
+                    }
+                }
+
                 return new ItemSpec
                 {
                     ItemId = item.info.itemid,
@@ -1137,6 +1147,10 @@ namespace Oxide.Plugins
                     Name = item.name,
                     Skin = item.skin,
                     DataInt = item.instanceData?.dataInt ?? 0,
+                    Amount = item.amount,
+                    Position = item.position,
+                    Capacity = item.contents?.capacity ?? 0,
+                    Contents = contents,
                 };
             }
 
@@ -1145,6 +1159,10 @@ namespace Oxide.Plugins
             public string Name;
             public ulong Skin;
             public int DataInt;
+            public int Amount;
+            public int Position;
+            public int Capacity;
+            public List<ItemSpec> Contents;
 
             public int TargetItemId => IsBlueprint() ? BlueprintTarget : ItemId;
 
@@ -1172,6 +1190,7 @@ namespace Oxide.Plugins
                 }
 
                 item.name = Name;
+                item.position = Position;
 
                 if (DataInt != 0)
                 {
@@ -1181,6 +1200,30 @@ namespace Oxide.Plugins
                         item.instanceData.ShouldPool = false;
                     }
                     item.instanceData.dataInt = DataInt;
+                }
+
+                if (Contents != null && Contents.Count > 0)
+                {
+                    if (item.contents == null)
+                    {
+                        item.contents = new ItemContainer();
+                        item.contents.ServerInitialize(null, Math.Max(Capacity, Contents.Count));
+                        item.contents.GiveUID();
+                        item.contents.parent = item;
+                    }
+                    else
+                    {
+                        item.contents.capacity = Math.Max(item.contents.capacity, Capacity);
+                    }
+
+                    foreach (var childItemSpec in Contents)
+                    {
+                        var childItem = childItemSpec.Create(childItemSpec.Amount);
+                        if (!childItem.MoveToContainer(item.contents, childItemSpec.Position))
+                        {
+                            childItem.Remove();
+                        }
+                    }
                 }
 
                 return item;
@@ -2230,6 +2273,9 @@ namespace Oxide.Plugins
                     Skin = itemSpec.Skin,
                     IsBlueprint = isBlueprint,
                     DataInt = itemSpec.DataInt,
+                    Position = itemSpec.Position,
+                    Capacity = itemSpec.Capacity,
+                    Contents = SerializeContents(itemSpec.Contents),
                     _itemSpec = itemSpec,
                 };
             }
@@ -2238,6 +2284,37 @@ namespace Oxide.Plugins
             {
                 var itemSpec = ItemSpec.FromItem(item);
                 return FromItemSpec(ref itemSpec, item.amount);
+            }
+
+            private static List<VendingItem> SerializeContents(List<ItemSpec> itemSpecList)
+            {
+                if (itemSpecList == null || itemSpecList.Count == 0)
+                    return null;
+
+                var vendingItemList = new List<VendingItem>(itemSpecList.Count);
+
+                for (var i = 0; i < itemSpecList.Count; i++)
+                {
+                    var itemSpec = itemSpecList[i];
+                    vendingItemList.Add(VendingItem.FromItemSpec(ref itemSpec, itemSpec.Amount));
+                }
+
+                return vendingItemList;
+            }
+
+            private static List<ItemSpec> DeserializeContents(List<VendingItem> vendingItemList)
+            {
+                if (vendingItemList == null || vendingItemList.Count == 0)
+                    return null;
+
+                var itemSpecList = new List<ItemSpec>(vendingItemList.Count);
+
+                foreach (var vendingItem in vendingItemList)
+                {
+                    itemSpecList.Add(vendingItem.GetItemSpec().Value);
+                }
+
+                return itemSpecList;
             }
 
             [JsonProperty("ShortName")]
@@ -2257,6 +2334,15 @@ namespace Oxide.Plugins
 
             [JsonProperty("DataInt", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public int DataInt;
+
+            [JsonProperty("Position", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public int Position;
+
+            [JsonProperty("Capacity", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public int Capacity;
+
+            [JsonProperty("Contents", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public List<VendingItem> Contents;
 
             private ItemSpec? _itemSpec;
 
@@ -2278,6 +2364,10 @@ namespace Oxide.Plugins
                             Name = DisplayName,
                             Skin = Skin,
                             DataInt = DataInt,
+                            Amount = Amount,
+                            Position = Position,
+                            Capacity = Capacity,
+                            Contents = DeserializeContents(Contents)
                         };
                     }
                 }
@@ -2324,6 +2414,9 @@ namespace Oxide.Plugins
                     SellItem = VendingItem.FromItem(sellItem),
                     CurrencyItem = VendingItem.FromItem(currencyItem),
                 };
+
+                offer.SellItem.Position = 0;
+                offer.CurrencyItem.Position = 0;
 
                 if (settingsItem != null)
                 {
