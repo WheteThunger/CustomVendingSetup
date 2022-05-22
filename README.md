@@ -10,6 +10,8 @@
 - Synchronizes edits with copies of the vending machines at duplicate monuments
 - Compatible with NPC vending machines spawned at monuments by plugins such as [Monument Addons](https://umod.org/plugins/monument-addons)
 - Supports blueprints, as well as items with custom skins and names
+- Supports attachments and other child items
+- Supports ammo type and amount
 
 ## Required plugins
 
