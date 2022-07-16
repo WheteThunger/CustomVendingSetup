@@ -46,10 +46,15 @@ Default configuration:
 
 ```json
 {
+  "Shop UI settings": {
+    "Enable skin overlays": false
+  },
   "Override item max stack sizes (shortname: amount)": {}
 }
 ```
 
+- `Shop UI settings`
+  - `Enable skin overlays` (`true` or `false`) -- While `true`, skin images will be overlayed on top of items when needed.
 - `Override item max stack sizes (shortname: amount)` -- This section allows you to override the max stack size that players can get when purchasing items, by item short name. This is intended to allow players to get larger stacks of items from vending machines than they could get from other sources.
   - This feature only applies to vending machines customized by this plugin.
   - This feature might not work with every stack size plugin. Worst case, editing these settings may have no effect.
@@ -57,11 +62,9 @@ Default configuration:
 Example of overriding stack sizes:
 
 ```json
-{
-  "Override item max stack sizes (shortname: amount)": {
-    "wood": 10000,
-    "stones": 5000
-  }
+"Override item max stack sizes (shortname: amount)": {
+  "wood": 10000,
+  "stones": 5000
 }
 ```
 
