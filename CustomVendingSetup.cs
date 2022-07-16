@@ -183,7 +183,7 @@ namespace Oxide.Plugins
             var sellableItems = Facepunch.Pool.GetList<Item>();
             var amountAvailable = 0;
             var sellItemSpec = offer.SellItem.GetItemSpec().Value;
-            sellItemSpec.FindAllInContainer(vendingMachine.inventory, sellableItems, ref amountAvailable);
+            sellItemSpec.FindAllInContainer(vendingMachine.inventory, sellableItems, ref amountAvailable, MatchOptions.Skin);
             if (sellableItems.Count == 0)
             {
                 Facepunch.Pool.FreeList(ref sellableItems);
@@ -203,11 +203,11 @@ namespace Oxide.Plugins
             var currencyItems = Facepunch.Pool.GetList<Item>();
             var currencyAvailable = 0;
             var currencyItemSpec = offer.CurrencyItem.GetItemSpec().Value;
-            var currencyMatchOptions = MatchOptions.All;
-            if (currencyItemSpec.Skin == 0)
+            var currencyMatchOptions = MatchOptions.Empty;
+            if (currencyItemSpec.Skin != 0)
             {
-                // Allow any skin to match if the currency item does not require a skin.
-                currencyMatchOptions &= ~MatchOptions.Skin;
+                // Require skin to match if not default skin.
+                currencyMatchOptions |= MatchOptions.Skin;
             }
             currencyItemSpec.FindAllInInventory(player.inventory, currencyItems, ref currencyAvailable, currencyMatchOptions);
             if (currencyItems.Count == 0)
@@ -236,7 +236,14 @@ namespace Oxide.Plugins
 
             foreach (var currencyItem in currencyItems)
             {
-                var amountToTake = Mathf.Min(currencyToTake, currencyItem.amount);
+                var useableAmount = (currencyItem.contents?.itemList?.Count ?? 0) > 0
+                    ? currencyItem.amount - 1
+                    : currencyItem.amount;
+
+                if (useableAmount <= 0)
+                    continue;
+
+                var amountToTake = Mathf.Min(currencyToTake, useableAmount);
                 currencyToTake -= amountToTake;
 
                 var itemToTake = currencyItem.amount > amountToTake
@@ -247,9 +254,7 @@ namespace Oxide.Plugins
                 marketTerminal?._onCurrencyRemovedCached?.Invoke(player, itemToTake);
 
                 if (currencyToTake <= 0)
-                {
                     break;
-                }
             }
 
             vendingMachine.transactionActive = false;
@@ -329,7 +334,7 @@ namespace Oxide.Plugins
 
             // Override VendingInStock behavior to prevent creating new items in the container.
             // This also ensures additional item attributes are preserved.
-            var existingItem = itemSpec.FirstInContainer(vendingMachine.inventory);
+            var existingItem = itemSpec.FirstInContainer(vendingMachine.inventory, MatchOptions.Skin);
             if (existingItem != null)
             {
                 existingItem.amount += soldItem.amount;
@@ -1290,7 +1295,7 @@ namespace Oxide.Plugins
         private enum MatchOptions
         {
             Skin = 1 << 0,
-            All = ~0,
+            Empty = 2 << 0,
         }
 
         private struct ItemSpec
@@ -1471,37 +1476,27 @@ namespace Oxide.Plugins
                 return Create(amount);
             }
 
-            public bool Matches(Item item, MatchOptions matchOptions = MatchOptions.All, float minCondition = 0)
+            public bool Matches(Item item, MatchOptions matchOptions, float minCondition = 0)
             {
                 if (BlueprintTarget != 0)
-                {
                     return BlueprintTarget == item.blueprintTarget;
-                }
 
                 if (item.info.itemid != ItemId)
-                {
                     return false;
-                }
 
                 if ((matchOptions & MatchOptions.Skin) != 0 && item.skin != Skin)
-                {
                     return false;
-                }
 
                 if (minCondition > 0 && item.hasCondition && (item.conditionNormalized < minCondition || item.maxConditionNormalized < minCondition))
-                {
                     return false;
-                }
 
                 if (DataInt != (item.instanceData?.dataInt ?? 0))
-                {
                     return false;
-                }
 
                 return true;
             }
 
-            public Item FirstInContainer(ItemContainer container, MatchOptions matchOptions = MatchOptions.All)
+            public Item FirstInContainer(ItemContainer container, MatchOptions matchOptions)
             {
                 foreach (var item in container.itemList)
                 {
@@ -1514,7 +1509,7 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            public int GetAmountInContainer(ItemContainer container, MatchOptions matchOptions = MatchOptions.All)
+            public int GetAmountInContainer(ItemContainer container, MatchOptions matchOptions)
             {
                 var count = 0;
 
@@ -1522,6 +1517,10 @@ namespace Oxide.Plugins
                 {
                     if (Matches(item, matchOptions))
                     {
+                        var useableAmount = GetUseableAmount(item, matchOptions);
+                        if (useableAmount <= 0)
+                            continue;
+
                         count += item.amount;
                     }
                 }
@@ -1529,23 +1528,34 @@ namespace Oxide.Plugins
                 return count;
             }
 
-            public void FindAllInContainer(ItemContainer container, List<Item> resultItemList, ref int sum, MatchOptions matchOptions = MatchOptions.All, float minCondition = 0)
+            public void FindAllInContainer(ItemContainer container, List<Item> resultItemList, ref int sum, MatchOptions matchOptions, float minCondition = 0)
             {
                 foreach (var item in container.itemList)
                 {
                     if (Matches(item, matchOptions, minCondition))
                     {
+                        var useableAmount = GetUseableAmount(item, matchOptions);
+                        if (useableAmount <= 0)
+                            continue;
+
                         resultItemList.Add(item);
-                        sum += item.amount;
+                        sum += useableAmount;
                     }
                 }
             }
 
-            public void FindAllInInventory(PlayerInventory playerInventory, List<Item> resultItemList, ref int sum, MatchOptions matchOptions = MatchOptions.All)
+            public void FindAllInInventory(PlayerInventory playerInventory, List<Item> resultItemList, ref int sum, MatchOptions matchOptions)
             {
                 FindAllInContainer(playerInventory.containerMain, resultItemList, ref sum, matchOptions, minCondition: 0.5f);
                 FindAllInContainer(playerInventory.containerBelt, resultItemList, ref sum, matchOptions, minCondition: 0.5f);
                 FindAllInContainer(playerInventory.containerWear, resultItemList, ref sum, matchOptions, minCondition: 0.5f);
+            }
+
+            private int GetUseableAmount(Item item, MatchOptions matchOptions)
+            {
+                return (matchOptions & MatchOptions.Empty) != 0 && (item.contents?.itemList?.Count ?? 0) > 0
+                    ? item.amount - 1
+                    : item.amount;
             }
         }
 
@@ -2363,7 +2373,7 @@ namespace Oxide.Plugins
                     }
 
                     var itemSpec = offer.SellItem.GetItemSpec().Value;
-                    var totalAmountOfItem = itemSpec.GetAmountInContainer(_vendingMachine.inventory);
+                    var totalAmountOfItem = itemSpec.GetAmountInContainer(_vendingMachine.inventory, MatchOptions.Skin);
                     var numPurchasesInStock = totalAmountOfItem / offer.SellItem.Amount;
                     var refillNumberOfPurchases = offer.RefillMax - numPurchasesInStock;
 
@@ -2395,7 +2405,7 @@ namespace Oxide.Plugins
 
                     // Always increase the quantity of an existing item if present, rather than creating a new item.
                     // This is done to prevent ridiculous configurations from potentially filling up the vending machine with specific items.
-                    var existingItem = itemSpec.FirstInContainer(_vendingMachine.inventory);
+                    var existingItem = itemSpec.FirstInContainer(_vendingMachine.inventory, MatchOptions.Skin);
                     if (existingItem != null)
                     {
                         try
