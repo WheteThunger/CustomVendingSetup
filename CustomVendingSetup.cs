@@ -26,7 +26,7 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        private Plugin MonumentFinder, VendingInStock;
+        private Plugin InstantBuy, MonumentFinder, VendingInStock;
 
         private static CustomVendingSetup _pluginInstance;
         private static SavedData _pluginData;
@@ -313,7 +313,25 @@ namespace Oxide.Plugins
 
             Facepunch.Pool.FreeList(ref sellableItems);
             vendingMachine.UpdateEmptyFlag();
+
+            if (InstantBuy == null)
+            {
+                var lootContainer = player.inventory.loot.containers.FirstOrDefault();
+                if (lootContainer != null && lootContainer.entityOwner == vendingMachine)
+                {
+                    OnVendingShopOpened(vendingMachine, player);
+                }
+            }
+
             return _boxedTrue;
+        }
+
+        private void OnBuyVendingItem(NPCVendingMachine vendingMachine, BasePlayer player, int sellOrderID, int amount)
+        {
+            if (InstantBuy == null)
+            {
+                _componentTracker.GetComponent(vendingMachine)?.RemoveUI(player);
+            }
         }
 
         // This hook is exposed by plugin: Vending In Stock (VendingInStock).
@@ -2228,6 +2246,19 @@ namespace Oxide.Plugins
                 CuiHelper.AddUi(player, json);
             }
 
+            public void RemoveUI(BasePlayer player)
+            {
+                if (_adminUIViewers.Remove(player))
+                {
+                    DestroyAdminUI(player);
+                }
+
+                if (_shopUIViewers.Remove(player))
+                {
+                    DestroyShopUI(player);
+                }
+            }
+
             protected override void Awake()
             {
                 base.Awake();
@@ -2249,17 +2280,7 @@ namespace Oxide.Plugins
             private void PlayerStoppedLooting(BasePlayer player)
             {
                 _pluginInstance?.TrackStart();
-
-                if (_adminUIViewers.Remove(player))
-                {
-                    DestroyAdminUI(player);
-                }
-
-                if (_shopUIViewers.Remove(player))
-                {
-                    DestroyShopUI(player);
-                }
-
+                RemoveUI(player);
                 _pluginInstance?.TrackEnd();
             }
 
