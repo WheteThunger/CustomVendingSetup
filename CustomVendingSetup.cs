@@ -2048,10 +2048,7 @@ namespace Oxide.Plugins
 
             public void HandleSave(NPCVendingMachine vendingMachine)
             {
-                if (Profile == null)
-                {
-                    Profile = GenerateProfile(vendingMachine);
-                }
+                CreateOrUpdateProfile(vendingMachine);
 
                 EditController.ApplyStateTo(Profile);
                 EditController.Kill();
@@ -2098,9 +2095,12 @@ namespace Oxide.Plugins
                 return _cachedShopUI;
             }
 
-            protected virtual VendingProfile GenerateProfile(NPCVendingMachine vendingMachine)
+            protected virtual void CreateOrUpdateProfile(NPCVendingMachine vendingMachine)
             {
-                return VendingProfile.FromVendingMachine(vendingMachine);
+                if (Profile == null)
+                {
+                    Profile = VendingProfile.FromVendingMachine(vendingMachine);
+                }
             }
 
             private void SetupVendingMachines()
@@ -2170,9 +2170,19 @@ namespace Oxide.Plugins
                 _pluginData.Save();
             }
 
-            protected override VendingProfile GenerateProfile(NPCVendingMachine vendingMachine)
+            protected override void CreateOrUpdateProfile(NPCVendingMachine vendingMachine)
             {
-                return VendingProfile.FromVendingMachine(vendingMachine, Location);
+                // Update the location, in case the vending machine has moved.
+                Location = MonumentRelativePosition.FromVendingMachine(vendingMachine);
+
+                if (Profile == null)
+                {
+                    Profile = VendingProfile.FromVendingMachine(vendingMachine, Location);
+                }
+                else
+                {
+                    Profile.Position = Location.GetPosition();
+                }
             }
         }
 
