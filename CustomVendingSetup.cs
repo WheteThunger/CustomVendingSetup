@@ -250,6 +250,12 @@ namespace Oxide.Plugins
                     ? currencyItemSpec.Split(currencyItem, amountToTake)
                     : currencyItem;
 
+                // Only take ammo from the original currency item, never the split item.
+                if (itemToTake == currencyItem)
+                {
+                    GiveWeaponAmmo(currencyItem, player);
+                }
+
                 vendingMachine.TakeCurrencyItem(itemToTake);
                 marketTerminal?._onCurrencyRemovedCached?.Invoke(player, itemToTake);
 
@@ -707,6 +713,41 @@ namespace Oxide.Plugins
             }
 
             return containerEntity;
+        }
+
+        private static void GiveWeaponAmmo(Item item, BasePlayer player)
+        {
+            var heldEntity = item.GetHeldEntity();
+            if (heldEntity == null)
+                return;
+
+            var baseProjectile = heldEntity as BaseProjectile;
+            if ((object)baseProjectile != null)
+            {
+                var ammoType = baseProjectile.primaryMagazine?.ammoType;
+                if (ammoType != null && baseProjectile.primaryMagazine.contents > 0)
+                {
+                    var ammoitem = ItemManager.Create(ammoType, baseProjectile.primaryMagazine.contents);
+                    if (ammoitem != null)
+                    {
+                        player.GiveItem(ammoitem);
+                    }
+                }
+                return;
+            }
+
+            var flameThrower = heldEntity as FlameThrower;
+            if ((object)flameThrower != null)
+            {
+                if (flameThrower.fuelType != null && flameThrower.ammo > 0)
+                {
+                    var ammoItem = ItemManager.Create(flameThrower.fuelType, flameThrower.ammo);
+                    if (ammoItem != null)
+                    {
+                        player.GiveItem(ammoItem);
+                    }
+                }
+            }
         }
 
         private static void GiveSoldItem(NPCVendingMachine vendingMachine, Item item, BasePlayer player, MarketTerminal marketTerminal, ItemContainer targetContainer)
