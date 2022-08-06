@@ -820,7 +820,7 @@ namespace Oxide.Plugins
             public const string CancelButtonTextColor = "0.71 0.71 0.71 1";
 
             public const float PanelWidth = 380.5f;
-            public const float HeaderHeight = 21;
+            public const float HeaderHeight = 23;
             public const float ItemSpacing = 4;
             public const float ItemBoxSize = 58;
 
@@ -860,7 +860,7 @@ namespace Oxide.Plugins
             public static string RenderContainerUI(BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
             {
                 var offsetX = 192;
-                var offsetY = 139;
+                var offsetY = 141;
 
                 var cuiElements = new CuiElementContainer
                 {
