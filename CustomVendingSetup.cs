@@ -1914,6 +1914,19 @@ namespace Oxide.Plugins
 
         private class EditController
         {
+            private static void OpenEditPanel(BasePlayer player, StorageContainer containerEntity)
+            {
+                var playerLoot = player.inventory.loot;
+                playerLoot.Clear();
+                playerLoot.PositionChecks = false;
+                playerLoot.entitySource = containerEntity;
+                playerLoot.itemSource = null;
+                playerLoot.MarkDirty();
+                playerLoot.AddContainer(containerEntity.inventory);
+                playerLoot.SendImmediate();
+                player.ClientRPCPlayer(null, player, "RPC_OpenLootPanel", containerEntity.panelName);
+            }
+
             public BasePlayer EditorPlayer { get; private set; }
 
             private BaseVendingController _vendingController;
@@ -1933,7 +1946,7 @@ namespace Oxide.Plugins
                 _formState = EditFormState.FromVendingMachine(vendingMachine);
                 EditContainerComponent.AddToContainer(_container, this);
                 _container.SendAsSnapshot(editorPlayer.Connection);
-                _container.PlayerOpenLoot(editorPlayer, _container.panelName, doPositionChecks: false);
+                OpenEditPanel(editorPlayer, _container);
 
                 CuiHelper.AddUi(editorPlayer, ContainerUIRenderer.RenderContainerUI(editorPlayer, vendingMachine, _formState));
             }
