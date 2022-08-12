@@ -5,7 +5,7 @@
 ## Features
 
 - Allows customizing items sold at monument vending machines
-- Supports vanilla monuments, custom monuments, train tunnels, and underwater labs (via Monument Finder)
+- Supports vanilla monuments, custom monuments, train tunnels, and underwater labs
 - Saves customizations for future restarts and wipes, based on the vending machine's relative position to the monument
 - Synchronizes edits with copies of the vending machines at duplicate monuments
 - Compatible with NPC vending machines spawned at monuments by plugins such as [Monument Addons](https://umod.org/plugins/monument-addons)
@@ -15,7 +15,7 @@
 
 ## Required plugins
 
-- [Monument Finder](https://umod.org/plugins/monument-finder) -- Simply install. No configuration needed.
+- [Monument Finder](https://umod.org/plugins/monument-finder) -- Simply install. No configuration needed, except for custom monuments.
 
 ## How it works
 
@@ -95,7 +95,7 @@ No. At most 7 items can be sold per vending machine. It's not possible to sell m
 
 #### How do I setup custom monuments?
 
-As a prerequisite, the custom monument must use the monument marker prefab and have a unique name. Then, you must configure the monument's bounds in [Monument Finder](https://umod.org/plugins/monument-finder) to envelope the monument so that Custom Vending Setup can accurately determine whether a given vending machine is within that monument.
+As a prerequisite, the custom monument must use the monument marker prefab and have a unique name. Then, you must configure the monument's bounds in [Monument Finder](https://umod.org/plugins/monument-finder) to envelope the monument so that Custom Vending Setup can accurately determine whether a given vending machine is within that monument. Please see the Monument Finder plugin documentation for further guidance.
 
 ## Developer API
 
