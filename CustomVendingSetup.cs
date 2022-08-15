@@ -256,7 +256,14 @@ namespace Oxide.Plugins
                     GiveWeaponAmmo(currencyItem, player);
                 }
 
-                vendingMachine.TakeCurrencyItem(itemToTake);
+                // Instead of calling `vendingMachine.TakeCurrencyItem(itemToTake)`, just remove the item.
+                // This fixes an "issue" where the item would go into the vending machine storage if there was a matching stack.
+                if (Interface.CallHook("OnTakeCurrencyItem", vendingMachine, itemToTake) == null)
+                {
+                    itemToTake.RemoveFromContainer();
+                    itemToTake.Remove();
+                }
+
                 marketTerminal?._onCurrencyRemovedCached?.Invoke(player, itemToTake);
 
                 if (currencyToTake <= 0)
