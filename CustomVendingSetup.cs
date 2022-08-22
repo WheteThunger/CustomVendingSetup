@@ -26,7 +26,7 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        private Plugin InstantBuy, MonumentFinder, VendingInStock;
+        private Plugin BagOfHolding, InstantBuy, MonumentFinder, VendingInStock;
 
         private static CustomVendingSetup _pluginInstance;
         private static SavedData _pluginData;
@@ -54,6 +54,7 @@ namespace Oxide.Plugins
         private ComponentTracker<NPCVendingMachine, VendingMachineComponent> _componentTracker = new ComponentTracker<NPCVendingMachine, VendingMachineComponent>();
         private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
         private VendingMachineManager _vendingMachineManager;
+        private BagOfHoldingLimitManager _bagOfHoldingLimitManager;
 
         private ItemDefinition _noteItemDefinition;
         private bool _serverInitialized = false;
@@ -63,6 +64,7 @@ namespace Oxide.Plugins
         {
             _componentFactory = new ComponentFactory<NPCVendingMachine, VendingMachineComponent>(_componentTracker);
             _vendingMachineManager = new VendingMachineManager(_componentFactory, _dataProviderRegistry);
+            _bagOfHoldingLimitManager = new BagOfHoldingLimitManager(this);
         }
 
         #endregion
@@ -102,6 +104,8 @@ namespace Oxide.Plugins
                 });
             }
 
+            _bagOfHoldingLimitManager.OnServerInitialized();
+
             Subscribe(nameof(OnEntitySpawned));
 
             _noteItemDefinition = ItemManager.FindItemDefinition("note");
@@ -120,9 +124,16 @@ namespace Oxide.Plugins
         {
             // Check whether initialized to detect only late (re)loads.
             // Note: We are not dynamically subscribing to OnPluginLoaded since that interferes with [PluginReference] for some reason.
-            if (_serverInitialized && plugin == MonumentFinder)
+            if (_serverInitialized && plugin.Name == MonumentFinder.Name)
             {
                 NextTick(_vendingMachineManager.SetupAll);
+                return;
+            }
+
+            if (plugin.Name == BagOfHolding.Name)
+            {
+                _bagOfHoldingLimitManager.HandleBagOfHoldingLoadedChanged();
+                return;
             }
         }
 
@@ -481,6 +492,61 @@ namespace Oxide.Plugins
         private MonumentAdapter GetMonumentAdapter(BaseEntity entity) =>
             GetMonumentAdapter(entity.transform.position);
 
+        private class BagOfHoldingLimitManager
+        {
+            private class CustomLimitProfile
+            {
+                [JsonProperty("Max total bags")]
+                public int MaxTotalBags = -1;
+            }
+
+            private CustomVendingSetup _plugin;
+            private object _limitProfile;
+
+            public BagOfHoldingLimitManager(CustomVendingSetup plugin)
+            {
+                _plugin = plugin;
+            }
+
+            public void OnServerInitialized()
+            {
+                HandleBagOfHoldingLoadedChanged();
+            }
+
+            public void HandleBagOfHoldingLoadedChanged()
+            {
+                if (_plugin.BagOfHolding == null)
+                    return;
+
+                _limitProfile = _plugin.BagOfHolding.Call("API_CreateLimitProfile", JsonConvert.SerializeObject(new CustomLimitProfile()));
+
+                if (_limitProfile == null)
+                {
+                    _plugin.LogError("Failed to create limit profile.");
+                }
+            }
+
+            public void SetLimitProfile(ItemContainer container)
+            {
+                if (_limitProfile == null || _plugin.BagOfHolding == null)
+                    return;
+
+                var result = _plugin.BagOfHolding.Call("API_SetLimitProfile", container, _limitProfile);
+                if (!(result is bool) || (bool)result == false)
+                {
+                    _plugin.LogError("Failed to set limit profile for vending container");
+                }
+            }
+
+            public void RemoveLimitProfile(ItemContainer container)
+            {
+                if (_limitProfile == null || _plugin.BagOfHolding == null)
+                    return;
+
+                _plugin.BagOfHolding.Call("API_RemoveLimitProfile", container);
+            }
+        }
+
         #endregion
 
         #region Exposed Hooks
@@ -662,6 +728,8 @@ namespace Oxide.Plugins
             var container = containerEntity.inventory;
             container.allowedContents = ItemContainer.ContentsType.Generic;
             container.capacity = ContainerCapacity;
+
+            _pluginInstance?._bagOfHoldingLimitManager.SetLimitProfile(container);
 
             for (var orderIndex = 0; orderIndex < vendingOffers.Length && orderIndex < 9; orderIndex++)
             {
@@ -2007,6 +2075,7 @@ namespace Oxide.Plugins
                     _container.OnNetworkSubscribersLeave(new List<Network.Connection> { EditorPlayer.Connection });
                 }
 
+                _pluginInstance?._bagOfHoldingLimitManager.RemoveLimitProfile(_container.inventory);
                 _container.Kill();
                 _container = null;
             }
