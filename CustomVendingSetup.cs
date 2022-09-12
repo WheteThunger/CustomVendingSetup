@@ -124,13 +124,13 @@ namespace Oxide.Plugins
         {
             // Check whether initialized to detect only late (re)loads.
             // Note: We are not dynamically subscribing to OnPluginLoaded since that interferes with [PluginReference] for some reason.
-            if (_serverInitialized && plugin.Name == MonumentFinder.Name)
+            if (_serverInitialized && plugin.Name == nameof(MonumentFinder))
             {
                 NextTick(_vendingMachineManager.SetupAll);
                 return;
             }
 
-            if (plugin.Name == BagOfHolding.Name)
+            if (plugin.Name == nameof(BagOfHolding))
             {
                 _bagOfHoldingLimitManager.HandleBagOfHoldingLoadedChanged();
                 return;
