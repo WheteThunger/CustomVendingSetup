@@ -827,6 +827,9 @@ namespace Oxide.Plugins
 
         private static void GiveSoldItem(NPCVendingMachine vendingMachine, Item item, BasePlayer player, MarketTerminal marketTerminal, ItemContainer targetContainer)
         {
+            // Unset the placeholder flag to allow Enchanted Items to transform the artifact.
+            item.SetFlag(Item.Flag.Placeholder, false);
+
             if (targetContainer == null)
             {
                 vendingMachine.GiveSoldItem(item, player);
@@ -1593,6 +1596,9 @@ namespace Oxide.Plugins
                         flameThrower.ammo = AmmoAmount;
                     }
                 }
+
+                // Set the placeholder flag so that Enchanted Items doesn't transform the artifact into an enchanted item yet.
+                item.SetFlag(Item.Flag.Placeholder, true);
 
                 return item;
             }
