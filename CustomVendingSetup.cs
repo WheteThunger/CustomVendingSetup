@@ -122,11 +122,14 @@ namespace Oxide.Plugins
 
         private void OnPluginLoaded(Plugin plugin)
         {
-            // Check whether initialized to detect only late (re)loads.
-            // Note: We are not dynamically subscribing to OnPluginLoaded since that interferes with [PluginReference] for some reason.
-            if (_serverInitialized && plugin.Name == nameof(MonumentFinder))
+            if (plugin.Name == nameof(MonumentFinder))
             {
-                NextTick(_vendingMachineManager.SetupAll);
+                // Check whether initialized to detect only late (re)loads.
+                // Note: We are not dynamically subscribing to OnPluginLoaded since that interferes with [PluginReference].
+                if (_serverInitialized)
+                {
+                    NextTick(_vendingMachineManager.SetupAll);
+                }
                 return;
             }
 
