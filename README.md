@@ -91,11 +91,21 @@ Example of overriding stack sizes:
 
 #### Can I sell more than 7 items?
 
-No. At most 7 items can be sold per vending machine. It's not possible to sell more due to UI limitations in the vanilla game.
+No. At most 7 items can be sold per vending machine. It's not possible to sell more due to UI limitations in the vanilla game. A pagination feature might be implemented in future versions of the plugin.
 
 #### How do I setup custom monuments?
 
 As a prerequisite, the custom monument must use the monument marker prefab and have a unique name. Then, you must configure the monument's bounds in [Monument Finder](https://umod.org/plugins/monument-finder) to envelope the monument so that Custom Vending Setup can accurately determine whether a given vending machine is within that monument. Please see the Monument Finder plugin documentation for further guidance.
+
+#### Why do some items show more stock than configured?
+
+This can happen for vending machines that sell the same item for multiple amounts. For example, if a vending machine sells `1000` stones for `50` scrap, and `500` stones for `1000 wood` wood, if configured to stock `10` for both, the total amount stocked will be `10000` stones, meaning the player can purchase `10` purchases of the `1000`, or `20` purchases of `500`. This happens because each vending machine uses a single stock container for all items it sells.
+
+If you want to avoid this behavior, increase the restock amount for items sold at smaller amounts, or decrease the restock amount for items sold at higher amounts. For example, if selling `500` stones with `20` amount, sell `1000` stones for `10` amount.
+
+#### How do I display custom item names?
+
+There is currently no way to display custom item names, but this feature is planned.
 
 ## Developer API
 
