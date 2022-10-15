@@ -1,6 +1,5 @@
 ﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using Newtonsoft.Json.Serialization;
 using Oxide.Core;
 using Oxide.Core.Plugins;
 using Oxide.Core.Libraries.Covalence;
@@ -28,16 +27,13 @@ namespace Oxide.Plugins
         [PluginReference]
         private Plugin BagOfHolding, InstantBuy, MonumentFinder, VendingInStock;
 
-        private static CustomVendingSetup _pluginInstance;
-        private static SavedData _pluginData;
-
+        private SavedData _pluginData;
         private Configuration _pluginConfig;
 
         private const string PermissionUse = "customvendingsetup.use";
 
         private const string StoragePrefab = "assets/prefabs/deployable/large wood storage/box.wooden.large.prefab";
 
-        private const int BlueprintItemId = -996920608;
         private const int ItemsPerRow = 6;
 
         // Going over 7 causes offers to get cut off regardless of resolution.
@@ -47,23 +43,25 @@ namespace Oxide.Plugins
         private const int ContainerCapacity = 30;
         private const int MaxItemRows = ContainerCapacity / ItemsPerRow;
 
-        private readonly object _boxedTrue = true;
-        private readonly object _boxedFalse = false;
+        private readonly object True = true;
+        private readonly object False = false;
 
         private DataProviderRegistry _dataProviderRegistry = new DataProviderRegistry();
         private ComponentTracker<NPCVendingMachine, VendingMachineComponent> _componentTracker = new ComponentTracker<NPCVendingMachine, VendingMachineComponent>();
         private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
+        private MonumentFinderAdapter _monumentFinderAdapter;
         private VendingMachineManager _vendingMachineManager;
         private BagOfHoldingLimitManager _bagOfHoldingLimitManager;
 
         private ItemDefinition _noteItemDefinition;
-        private bool _serverInitialized = false;
-        private bool _performingInstantRestock = false;
+        private bool _isServerInitialized;
+        private bool _performingInstantRestock;
 
         public CustomVendingSetup()
         {
-            _componentFactory = new ComponentFactory<NPCVendingMachine, VendingMachineComponent>(_componentTracker);
-            _vendingMachineManager = new VendingMachineManager(_componentFactory, _dataProviderRegistry);
+            _monumentFinderAdapter = new MonumentFinderAdapter(this);
+            _componentFactory = new ComponentFactory<NPCVendingMachine, VendingMachineComponent>(this, _componentTracker);
+            _vendingMachineManager = new VendingMachineManager(this, _componentFactory, _dataProviderRegistry);
             _bagOfHoldingLimitManager = new BagOfHoldingLimitManager(this);
         }
 
@@ -73,8 +71,7 @@ namespace Oxide.Plugins
 
         private void Init()
         {
-            _pluginInstance = this;
-            _pluginConfig.Init(this);
+            _pluginConfig.Init();
             _pluginData = SavedData.Load();
 
             permission.RegisterPermission(PermissionUse, this);
@@ -84,9 +81,15 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
-            if (CheckDependencies())
+            _isServerInitialized = true;
+
+            if (MonumentFinder == null)
             {
-                // Delay to allow Monument Finder to register monuments via its OnServerInitialized() hook.
+                LogError("MonumentFinder is not loaded, get it at http://umod.org.");
+            }
+            else
+            {
+                // Delay to allow Monument Finder to register monuments via its `OnServerInitialized()` hook.
                 NextTick(() =>
                 {
                     _vendingMachineManager.SetupAll();
@@ -99,7 +102,9 @@ namespace Oxide.Plugins
 
                         var vendingMachine = container.entityOwner as NPCVendingMachine;
                         if (vendingMachine != null)
+                        {
                             OnVendingShopOpened(vendingMachine, player);
+                        }
                     }
                 });
             }
@@ -109,34 +114,32 @@ namespace Oxide.Plugins
             Subscribe(nameof(OnEntitySpawned));
 
             _noteItemDefinition = ItemManager.FindItemDefinition("note");
-            _serverInitialized = true;
         }
 
         private void Unload()
         {
             _vendingMachineManager.ResetAll();
-
-            _pluginData = null;
-            _pluginInstance = null;
         }
 
         private void OnPluginLoaded(Plugin plugin)
         {
-            if (plugin.Name == nameof(MonumentFinder))
+            switch (plugin.Name)
             {
-                // Check whether initialized to detect only late (re)loads.
-                // Note: We are not dynamically subscribing to OnPluginLoaded since that interferes with [PluginReference].
-                if (_serverInitialized)
+                case nameof(MonumentFinder):
                 {
-                    NextTick(_vendingMachineManager.SetupAll);
+                    // Check whether initialized to detect only late (re)loads.
+                    // Note: We are not dynamically subscribing to OnPluginLoaded since that interferes with the PluginReference attribute.
+                    if (_isServerInitialized)
+                    {
+                        // Delay to ensure MonumentFinder's `OnServerInitialized` method is called.
+                        NextTick(_vendingMachineManager.SetupAll);
+                    }
+                    return;
                 }
-                return;
-            }
 
-            if (plugin.Name == nameof(BagOfHolding))
-            {
-                _bagOfHoldingLimitManager.HandleBagOfHoldingLoadedChanged();
-                return;
+                case nameof(BagOfHolding):
+                    _bagOfHoldingLimitManager.HandleBagOfHoldingLoadedChanged();
+                    return;
             }
         }
 
@@ -145,10 +148,10 @@ namespace Oxide.Plugins
             // Delay to give other plugins a chance to save a reference so they can block setup.
             NextTick(() =>
             {
-                if (vendingMachine == null)
+                if (vendingMachine == null || vendingMachine.IsDestroyed)
                     return;
 
-                _vendingMachineManager.OnVendingMachineSpawned(vendingMachine);
+                _vendingMachineManager.HandleVendingMachineSpawned(vendingMachine);
             });
         }
 
@@ -201,7 +204,7 @@ namespace Oxide.Plugins
             if (sellableItems.Count == 0)
             {
                 Facepunch.Pool.FreeList(ref sellableItems);
-                return _boxedFalse;
+                return False;
             }
 
             // Verify the vending machine has sufficient stock.
@@ -210,7 +213,7 @@ namespace Oxide.Plugins
             if (amountRequested > amountAvailable)
             {
                 Facepunch.Pool.FreeList(ref sellableItems);
-                return _boxedFalse;
+                return False;
             }
 
             // Get all item stacks in the player inventory that match the currency item.
@@ -228,7 +231,7 @@ namespace Oxide.Plugins
             {
                 Facepunch.Pool.FreeList(ref sellableItems);
                 Facepunch.Pool.FreeList(ref currencyItems);
-                return _boxedFalse;
+                return False;
             }
 
             // Verify the player has enough currency.
@@ -237,7 +240,7 @@ namespace Oxide.Plugins
             {
                 Facepunch.Pool.FreeList(ref sellableItems);
                 Facepunch.Pool.FreeList(ref currencyItems);
-                return _boxedFalse;
+                return False;
             }
 
             var marketTerminal = targetContainer?.entityOwner as MarketTerminal;
@@ -350,7 +353,7 @@ namespace Oxide.Plugins
                 }
             }
 
-            return _boxedTrue;
+            return True;
         }
 
         private void OnBuyVendingItem(NPCVendingMachine vendingMachine, BasePlayer player, int sellOrderID, int amount)
@@ -372,7 +375,7 @@ namespace Oxide.Plugins
             // If refill delay is 0, the item has already been restocked.
             if (_performingInstantRestock)
             {
-                return _boxedFalse;
+                return False;
             }
 
             var itemSpec = ItemSpec.FromItem(soldItem);
@@ -384,7 +387,7 @@ namespace Oxide.Plugins
             {
                 existingItem.amount += soldItem.amount;
                 existingItem.MarkDirty();
-                return _boxedFalse;
+                return False;
             }
 
             var newItem = itemSpec.Create(soldItem.amount);
@@ -395,7 +398,7 @@ namespace Oxide.Plugins
             }
             vendingMachine.transactionActive = false;
 
-            return _boxedFalse;
+            return False;
         }
 
         #endregion
@@ -410,13 +413,13 @@ namespace Oxide.Plugins
         private void API_RefreshDataProvider(NPCVendingMachine vendingMachine)
         {
             _vendingMachineManager.HandleVendingMachineKilled(vendingMachine);
-            _vendingMachineManager.OnVendingMachineSpawned(vendingMachine);
+            _vendingMachineManager.HandleVendingMachineSpawned(vendingMachine);
         }
 
         // Undocumented. Intended for MonumentAddons migration to become a Data Provider.
         private JObject API_MigrateVendingProfile(NPCVendingMachine vendingMachine)
         {
-            var location = MonumentRelativePosition.FromVendingMachine(vendingMachine);
+            var location = MonumentRelativePosition.FromVendingMachine(_monumentFinderAdapter, vendingMachine);
             if (location == null)
             {
                 // This can happen if a vending machine was moved outside a monument's bounds.
@@ -451,17 +454,6 @@ namespace Oxide.Plugins
 
         #region Dependencies
 
-        private bool CheckDependencies()
-        {
-            if (MonumentFinder == null)
-            {
-                LogError("MonumentFinder is not loaded, get it at http://umod.org.");
-                return false;
-            }
-
-            return true;
-        }
-
         private class MonumentAdapter
         {
             public string PrefabName => (string)_monumentInfo["PrefabName"];
@@ -482,18 +474,32 @@ namespace Oxide.Plugins
                 ((Func<Vector3, bool>)_monumentInfo["IsInBounds"]).Invoke(position);
         }
 
-        private MonumentAdapter GetMonumentAdapter(Vector3 position)
+        private class MonumentFinderAdapter
         {
-            var dictResult = MonumentFinder.Call("API_GetClosest", position) as Dictionary<string, object>;
-            if (dictResult == null)
-                return null;
+            private CustomVendingSetup _plugin;
+            private Plugin _monumentFinder => _plugin.MonumentFinder;
+            private bool _isLoaded => _monumentFinder != null;
 
-            var monument = new MonumentAdapter(dictResult);
-            return monument.IsInBounds(position) ? monument : null;
+            public MonumentFinderAdapter(CustomVendingSetup plugin)
+            {
+                _plugin = plugin;
+            }
+
+            public MonumentAdapter GetMonumentAdapter(Vector3 position)
+            {
+                var dictResult = _monumentFinder?.Call("API_GetClosest", position) as Dictionary<string, object>;
+                if (dictResult == null)
+                    return null;
+
+                var monument = new MonumentAdapter(dictResult);
+                return monument.IsInBounds(position) ? monument : null;
+            }
+
+            public MonumentAdapter GetMonumentAdapter(BaseEntity entity)
+            {
+                return GetMonumentAdapter(entity.transform.position);
+            }
         }
-
-        private MonumentAdapter GetMonumentAdapter(BaseEntity entity) =>
-            GetMonumentAdapter(entity.transform.position);
 
         private class BagOfHoldingLimitManager
         {
@@ -525,7 +531,7 @@ namespace Oxide.Plugins
 
                 if (_limitProfile == null)
                 {
-                    _plugin.LogError("Failed to create limit profile.");
+                    LogError("Failed to create limit profile.");
                 }
             }
 
@@ -537,7 +543,7 @@ namespace Oxide.Plugins
                 var result = _plugin.BagOfHolding.Call("API_SetLimitProfile", container, _limitProfile);
                 if (!(result is bool) || (bool)result == false)
                 {
-                    _plugin.LogError("Failed to set limit profile for vending container");
+                    LogError("Failed to set limit profile for vending container");
                 }
             }
 
@@ -638,6 +644,10 @@ namespace Oxide.Plugins
 
         #region Helper Methods
 
+        public static void LogInfo(string message) => Interface.Oxide.LogInfo($"[Custom Vending Setup] {message}");
+        public static void LogError(string message) => Interface.Oxide.LogError($"[Custom Vending Setup] {message}");
+        public static void LogWarning(string message) => Interface.Oxide.LogWarning($"[Custom Vending Setup] {message}");
+
         private static bool AreVectorsClose(Vector3 a, Vector3 b, float xZTolerance = 0.001f, float yTolerance = 10)
         {
             // Allow a generous amount of vertical distance given that plugins may snap entities to terrain.
@@ -670,7 +680,7 @@ namespace Oxide.Plugins
             return offers;
         }
 
-        private static VendingOffer[] GetOffersFromContainer(BasePlayer player, ItemContainer container)
+        private static VendingOffer[] GetOffersFromContainer(CustomVendingSetup plugin, BasePlayer player, ItemContainer container)
         {
             var offers = new List<VendingOffer>();
 
@@ -686,7 +696,7 @@ namespace Oxide.Plugins
                     if (sellItem == null || currencyItem == null)
                         continue;
 
-                    offers.Add(VendingOffer.FromItems(player, sellItem, currencyItem, settingsItem));
+                    offers.Add(VendingOffer.FromItems(plugin, player, sellItem, currencyItem, settingsItem));
                 }
             }
 
@@ -724,7 +734,7 @@ namespace Oxide.Plugins
             return (orderIndex % MaxItemRows) * ItemsPerRow + 3;
         }
 
-        private static StorageContainer CreateOrdersContainer(BasePlayer player, VendingOffer[] vendingOffers, string shopName)
+        private static StorageContainer CreateOrdersContainer(CustomVendingSetup plugin, BasePlayer player, VendingOffer[] vendingOffers, string shopName)
         {
             var containerEntity = CreateContainerEntity(StoragePrefab);
 
@@ -732,7 +742,7 @@ namespace Oxide.Plugins
             container.allowedContents = ItemContainer.ContentsType.Generic;
             container.capacity = ContainerCapacity;
 
-            _pluginInstance?._bagOfHoldingLimitManager.SetLimitProfile(container);
+            plugin._bagOfHoldingLimitManager.SetLimitProfile(container);
 
             for (var orderIndex = 0; orderIndex < vendingOffers.Length && orderIndex < 9; orderIndex++)
             {
@@ -764,13 +774,13 @@ namespace Oxide.Plugins
                     ? vendingOffers[orderIndex]
                     : null;
 
-                var settingsItem = ItemManager.Create(_pluginInstance._noteItemDefinition);
+                var settingsItem = ItemManager.Create(plugin._noteItemDefinition);
                 if (settingsItem == null)
                     continue;
 
-                var refillMaxLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillMax);
-                var refillDelayLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillDelay);
-                var refillAmountLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillAmount);
+                var refillMaxLabel = plugin.GetMessage(player, Lang.SettingsRefillMax);
+                var refillDelayLabel = plugin.GetMessage(player, Lang.SettingsRefillDelay);
+                var refillAmountLabel = plugin.GetMessage(player, Lang.SettingsRefillAmount);
 
                 settingsItem.text = $"{refillMaxLabel}: {offer?.RefillMax ?? VendingOffer.DefaultRefillMax}"
                     + $"\n{refillDelayLabel}: {offer?.RefillDelay ?? VendingOffer.DefaultRefillDelay}"
@@ -782,7 +792,7 @@ namespace Oxide.Plugins
                     settingsItem.Remove();
             }
 
-            var generalSettingsItem = ItemManager.Create(_pluginInstance._noteItemDefinition);
+            var generalSettingsItem = ItemManager.Create(plugin._noteItemDefinition);
             if (generalSettingsItem != null)
             {
                 generalSettingsItem.text = shopName;
@@ -938,7 +948,7 @@ namespace Oxide.Plugins
             public const string TipUIName = "CustomVendingSetup.ContainerUI.Tip";
             public const string BroadcastUIName = "CustomVendingSetup.ContainerUI.Broadcast";
 
-            public static string RenderContainerUI(BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
+            public static string RenderContainerUI(CustomVendingSetup plugin, BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
             {
                 var offsetX = 192;
                 var offsetY = 141;
@@ -961,8 +971,8 @@ namespace Oxide.Plugins
                     }
                 };
 
-                var saveButtonText = _pluginInstance.GetMessage(player, Lang.ButtonSave);
-                var cancelButtonText = _pluginInstance.GetMessage(player, Lang.ButtonCancel);
+                var saveButtonText = plugin.GetMessage(player, Lang.ButtonSave);
+                var cancelButtonText = plugin.GetMessage(player, Lang.ButtonCancel);
 
                 var vendingMachineId = vendingMachine.net.ID;
 
@@ -995,9 +1005,9 @@ namespace Oxide.Plugins
                     }
                 );
 
-                var forSaleText = _pluginInstance.GetMessage(player, Lang.InfoForSale);
-                var costText = _pluginInstance.GetMessage(player, Lang.InfoCost);
-                var settingsText = _pluginInstance.GetMessage(player, Lang.InfoSettings);
+                var forSaleText = plugin.GetMessage(player, Lang.InfoForSale);
+                var costText = plugin.GetMessage(player, Lang.InfoCost);
+                var settingsText = plugin.GetMessage(player, Lang.InfoSettings);
 
                 AddHeaderLabel(cuiElements, 0, forSaleText);
                 AddHeaderLabel(cuiElements, 1, costText);
@@ -1140,7 +1150,7 @@ namespace Oxide.Plugins
         {
             public const string UIName = "CustomVendingSetup.AdminUI";
 
-            public static string RenderAdminUI(BasePlayer player, NPCVendingMachine vendingMachine, VendingProfile profile)
+            public static string RenderAdminUI(CustomVendingSetup plugin, BasePlayer player, NPCVendingMachine vendingMachine, VendingProfile profile)
             {
                 var numSellOrders = vendingMachine.sellOrders?.sellOrders.Count ?? 0;
                 var offsetY = 136 + 74 * numSellOrders;
@@ -1169,12 +1179,12 @@ namespace Oxide.Plugins
 
                 if (profile != null)
                 {
-                    var resetButtonText = _pluginInstance.GetMessage(player, Lang.ButtonReset);
+                    var resetButtonText = plugin.GetMessage(player, Lang.ButtonReset);
                     AddVendingButton(cuiElements, vendingMachineId, resetButtonText, UICommands.Reset, buttonIndex, UIConstants.ResetButtonColor, UIConstants.ResetButtonTextColor);
                     buttonIndex++;
                 }
 
-                var editButtonText = _pluginInstance.GetMessage(player, Lang.ButtonEdit);
+                var editButtonText = plugin.GetMessage(player, Lang.ButtonEdit);
                 AddVendingButton(cuiElements, vendingMachineId, editButtonText, UICommands.Edit, buttonIndex, UIConstants.SaveButtonColor, UIConstants.SaveButtonTextColor);
 
                 return CuiHelper.ToJson(cuiElements);
@@ -1407,9 +1417,9 @@ namespace Oxide.Plugins
 
         private class MonumentRelativePosition : IMonumentRelativePosition
         {
-            public static MonumentRelativePosition FromVendingMachine(NPCVendingMachine vendingMachine)
+            public static MonumentRelativePosition FromVendingMachine(MonumentFinderAdapter monumentFinderAdapter, NPCVendingMachine vendingMachine)
             {
-                var monument = _pluginInstance.GetMonumentAdapter(vendingMachine);
+                var monument = monumentFinderAdapter.GetMonumentAdapter(vendingMachine);
                 if (monument == null)
                     return null;
 
@@ -1729,13 +1739,13 @@ namespace Oxide.Plugins
 
                 if (dataProvider.GetDataCallback == null)
                 {
-                    _pluginInstance.LogError("Data provider missing GetData");
+                    LogError("Data provider missing GetData");
                     return null;
                 }
 
                 if (dataProvider.SaveDataCallback == null)
                 {
-                    _pluginInstance.LogError("Data provider missing SaveData");
+                    LogError("Data provider missing SaveData");
                     return null;
                 }
 
@@ -1805,7 +1815,8 @@ namespace Oxide.Plugins
 
         private class VendingMachineManager
         {
-            ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
+            private CustomVendingSetup _plugin;
+            private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
             private DataProviderRegistry _dataProviderRegistry;
 
             private HashSet<BaseVendingController> _uniqueControllers = new HashSet<BaseVendingController>();
@@ -1815,13 +1826,14 @@ namespace Oxide.Plugins
 
             private Dictionary<DataProvider, CustomVendingController> _controllersByDataProvider = new Dictionary<DataProvider, CustomVendingController>();
 
-            public VendingMachineManager(ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, DataProviderRegistry dataProviderRegistry)
+            public VendingMachineManager(CustomVendingSetup plugin, ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, DataProviderRegistry dataProviderRegistry)
             {
+                _plugin = plugin;
                 _componentFactory = componentFactory;
                 _dataProviderRegistry = dataProviderRegistry;
             }
 
-            public void OnVendingMachineSpawned(NPCVendingMachine vendingMachine)
+            public void HandleVendingMachineSpawned(NPCVendingMachine vendingMachine)
             {
                 if (GetController(vendingMachine) != null)
                 {
@@ -1850,7 +1862,7 @@ namespace Oxide.Plugins
                 }
                 else
                 {
-                    var location = MonumentRelativePosition.FromVendingMachine(vendingMachine);
+                    var location = MonumentRelativePosition.FromVendingMachine(_plugin._monumentFinderAdapter, vendingMachine);
                     if (location == null)
                     {
                         // Not at a monument.
@@ -1907,7 +1919,7 @@ namespace Oxide.Plugins
                     if (vendingMachine == null)
                         continue;
 
-                    OnVendingMachineSpawned(vendingMachine);
+                    HandleVendingMachineSpawned(vendingMachine);
                 }
             }
 
@@ -1944,7 +1956,7 @@ namespace Oxide.Plugins
                     return controller;
                 }
 
-                controller = new MonumentVendingController(_componentFactory, location);
+                controller = new MonumentVendingController(_plugin, _componentFactory, location);
                 _uniqueControllers.Add(controller);
 
                 return controller;
@@ -1966,7 +1978,7 @@ namespace Oxide.Plugins
                     return controller;
                 }
 
-                controller = new CustomVendingController(_componentFactory, dataProvider);
+                controller = new CustomVendingController(_plugin, _componentFactory, dataProvider);
                 _controllersByDataProvider[dataProvider] = controller;
                 _uniqueControllers.Add(controller);
 
@@ -1980,19 +1992,21 @@ namespace Oxide.Plugins
 
         private class EditContainerComponent : FacepunchBehaviour
         {
-            public static void AddToContainer(StorageContainer container, EditController editController)
+            public static void AddToContainer(CustomVendingSetup plugin, StorageContainer container, EditController editController)
             {
                 var component = container.GetOrAddComponent<EditContainerComponent>();
+                component._plugin = plugin;
                 component._editController = editController;
             }
 
+            private CustomVendingSetup _plugin;
             private EditController _editController;
 
             private void PlayerStoppedLooting(BasePlayer player)
             {
-                _pluginInstance?.TrackStart();
+                _plugin.TrackStart();
                 _editController.HandlePlayerLootEnd(player);
-                _pluginInstance?.TrackEnd();
+                _plugin.TrackEnd();
             }
         }
 
@@ -2013,26 +2027,28 @@ namespace Oxide.Plugins
 
             public BasePlayer EditorPlayer { get; private set; }
 
+            private CustomVendingSetup _plugin;
             private BaseVendingController _vendingController;
             private NPCVendingMachine _vendingMachine;
             private StorageContainer _container;
             private EditFormState _formState;
 
-            public EditController(BaseVendingController vendingController, NPCVendingMachine vendingMachine, BasePlayer editorPlayer)
+            public EditController(CustomVendingSetup plugin, BaseVendingController vendingController, NPCVendingMachine vendingMachine, BasePlayer editorPlayer)
             {
+                _plugin = plugin;
                 _vendingController = vendingController;
                 _vendingMachine = vendingMachine;
                 EditorPlayer = editorPlayer;
 
                 var offers = vendingController.Profile?.Offers ?? GetOffersFromVendingMachine(vendingMachine);
 
-                _container = CreateOrdersContainer(editorPlayer, offers, vendingMachine.shopName);
+                _container = CreateOrdersContainer(plugin, editorPlayer, offers, vendingMachine.shopName);
                 _formState = EditFormState.FromVendingMachine(vendingMachine);
-                EditContainerComponent.AddToContainer(_container, this);
+                EditContainerComponent.AddToContainer(plugin, _container, this);
                 _container.SendAsSnapshot(editorPlayer.Connection);
                 OpenEditPanel(editorPlayer, _container);
 
-                CuiHelper.AddUi(editorPlayer, ContainerUIRenderer.RenderContainerUI(editorPlayer, vendingMachine, _formState));
+                CuiHelper.AddUi(editorPlayer, ContainerUIRenderer.RenderContainerUI(plugin, editorPlayer, vendingMachine, _formState));
             }
 
             public void ToggleBroadcast()
@@ -2045,7 +2061,7 @@ namespace Oxide.Plugins
 
             public void ApplyStateTo(VendingProfile profile)
             {
-                profile.Offers = GetOffersFromContainer(EditorPlayer, _container.inventory);
+                profile.Offers = GetOffersFromContainer(_plugin, EditorPlayer, _container.inventory);
                 profile.Broadcast = _formState.Broadcast;
 
                 var updatedShopName = _container.inventory.GetSlot(ShopNameNoteSlot)?.text.Trim();
@@ -2084,7 +2100,7 @@ namespace Oxide.Plugins
                     _container.OnNetworkSubscribersLeave(new List<Network.Connection> { EditorPlayer.Connection });
                 }
 
-                _pluginInstance?._bagOfHoldingLimitManager.RemoveLimitProfile(_container.inventory);
+                _plugin._bagOfHoldingLimitManager.RemoveLimitProfile(_container.inventory);
                 _container.Kill();
                 _container = null;
             }
@@ -2104,6 +2120,8 @@ namespace Oxide.Plugins
 
             public bool HasVendingMachines => _vendingMachineList.Count > 0;
 
+            protected CustomVendingSetup _plugin;
+
             // List of vending machines with a position matching this controller.
             private HashSet<NPCVendingMachine> _vendingMachineList = new HashSet<NPCVendingMachine>();
 
@@ -2111,8 +2129,9 @@ namespace Oxide.Plugins
 
             private string _cachedShopUI;
 
-            public BaseVendingController(ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory)
+            protected BaseVendingController(CustomVendingSetup plugin, ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory)
             {
+                _plugin = plugin;
                 _componentFactory = componentFactory;
             }
 
@@ -2125,7 +2144,7 @@ namespace Oxide.Plugins
                 if (EditController != null)
                     return;
 
-                EditController = new EditController(this, vendingMachine, player);
+                EditController = new EditController(_plugin, this, vendingMachine, player);
             }
 
             public void HandleReset()
@@ -2222,8 +2241,8 @@ namespace Oxide.Plugins
         {
             public DataProvider DataProvider { get; private set; }
 
-            public CustomVendingController(ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, DataProvider dataProvider)
-                : base(componentFactory)
+            public CustomVendingController(CustomVendingSetup plugin, ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, DataProvider dataProvider)
+                : base(plugin, componentFactory)
             {
                 DataProvider = dataProvider;
                 Profile = dataProvider.GetData();
@@ -2245,8 +2264,10 @@ namespace Oxide.Plugins
         {
             public MonumentRelativePosition Location { get; private set; }
 
-            public MonumentVendingController(ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, MonumentRelativePosition location)
-                : base(componentFactory)
+            private SavedData _pluginData => _plugin._pluginData;
+
+            public MonumentVendingController(CustomVendingSetup plugin, ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, MonumentRelativePosition location)
+                : base(plugin, componentFactory)
             {
                 Location = location;
                 Profile = _pluginData.FindProfile(location);
@@ -2271,7 +2292,7 @@ namespace Oxide.Plugins
             protected override void CreateOrUpdateProfile(NPCVendingMachine vendingMachine)
             {
                 // Update the location, in case the vending machine has moved.
-                Location = MonumentRelativePosition.FromVendingMachine(vendingMachine);
+                Location = MonumentRelativePosition.FromVendingMachine(_plugin._monumentFinderAdapter, vendingMachine);
 
                 if (Profile == null)
                 {
@@ -2317,18 +2338,15 @@ namespace Oxide.Plugins
             where THost : UnityEngine.Component
             where TGuest : TrackedComponent<THost, TGuest>
         {
+            public CustomVendingSetup Plugin;
             public ComponentTracker<THost, TGuest> ComponentTracker;
+            public THost Host;
 
-            protected THost _host;
-
-            protected virtual void Awake()
-            {
-                _host = GetComponent<THost>();
-            }
+            public virtual void OnCreated() {}
 
             protected virtual void OnDestroy()
             {
-                ComponentTracker?.UnregisterComponent(_host);
+                ComponentTracker?.UnregisterComponent(Host);
             }
         }
 
@@ -2336,10 +2354,12 @@ namespace Oxide.Plugins
             where THost : UnityEngine.Component
             where TGuest : TrackedComponent<THost, TGuest>
         {
+            private CustomVendingSetup _plugin;
             private ComponentTracker<THost, TGuest> _componentTracker;
 
-            public ComponentFactory(ComponentTracker<THost, TGuest> componentTracker)
+            public ComponentFactory(CustomVendingSetup plugin, ComponentTracker<THost, TGuest> componentTracker)
             {
+                _plugin = plugin;
                 _componentTracker = componentTracker;
             }
 
@@ -2349,7 +2369,10 @@ namespace Oxide.Plugins
                 if (guest == null)
                 {
                     guest = host.gameObject.AddComponent<TGuest>();
+                    guest.Plugin = _plugin;
                     guest.ComponentTracker = _componentTracker;
+                    guest.Host = host;
+                    guest.OnCreated();
                     _componentTracker.RegisterComponent(host, guest);
                 }
 
@@ -2377,11 +2400,16 @@ namespace Oxide.Plugins
             private string _originalShopName;
             private bool? _originalBroadcast;
 
+            public override void OnCreated()
+            {
+                _vendingMachine = Host;
+            }
+
             public void ShowAdminUI(BasePlayer player)
             {
                 _adminUIViewers.Add(player);
                 CuiHelper.DestroyUi(player, AdminUIRenderer.UIName);
-                CuiHelper.AddUi(player, AdminUIRenderer.RenderAdminUI(player, _vendingMachine, Profile));
+                CuiHelper.AddUi(player, AdminUIRenderer.RenderAdminUI(Plugin, player, _vendingMachine, Profile));
             }
 
             public void ShowShopUI(BasePlayer player)
@@ -2408,12 +2436,6 @@ namespace Oxide.Plugins
                 }
             }
 
-            protected override void Awake()
-            {
-                base.Awake();
-                _vendingMachine = _host;
-            }
-
             protected override void OnDestroy()
             {
                 base.OnDestroy();
@@ -2428,9 +2450,9 @@ namespace Oxide.Plugins
 
             private void PlayerStoppedLooting(BasePlayer player)
             {
-                _pluginInstance?.TrackStart();
+                Plugin.TrackStart();
                 RemoveUI(player);
-                _pluginInstance?.TrackEnd();
+                Plugin.TrackEnd();
             }
 
             public void SetController(BaseVendingController vendingController)
@@ -2566,7 +2588,7 @@ namespace Oxide.Plugins
                     }
                     catch (System.OverflowException ex)
                     {
-                        _pluginInstance?.LogError($"Cannot multiply {refillNumberOfPurchases} by {offer.SellItem.Amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex.ToString());
+                        LogError($"Cannot multiply {refillNumberOfPurchases} by {offer.SellItem.Amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex.ToString());
 
                         // Prevent further refills to avoid spamming the console since this case cannot be fixed without editing the vending machine.
                         StopRefilling(offerIndex);
@@ -2586,7 +2608,7 @@ namespace Oxide.Plugins
                         }
                         catch (System.OverflowException ex)
                         {
-                            _pluginInstance?.LogError($"Cannot add {refillAmount} to {existingItem.amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex.ToString());
+                            LogError($"Cannot add {refillAmount} to {existingItem.amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex.ToString());
 
                             // Reduce refill rate to avoid spamming the console.
                             ScheduleDelayedRefill(offerIndex, offer);
@@ -2597,7 +2619,7 @@ namespace Oxide.Plugins
                     var item = offer.SellItem.Create(refillAmount);
                     if (item == null)
                     {
-                        _pluginInstance?.LogError($"Unable to create item '{offer.SellItem.ShortName}'. Does that item exist? Was it removed from the game?");
+                        LogError($"Unable to create item '{offer.SellItem.ShortName}'. Does that item exist? Was it removed from the game?");
 
                         // Prevent further refills to avoid spamming the console since this case cannot be fixed without editing the vending machine.
                         StopRefilling(offerIndex);
@@ -2612,7 +2634,7 @@ namespace Oxide.Plugins
                     }
                     else
                     {
-                        _pluginInstance?.LogError($"Unable to add {item.amount} '{item.info.shortname}' because the vending machine container rejected it.");
+                        LogError($"Unable to add {item.amount} '{item.info.shortname}' because the vending machine container rejected it.");
 
                         item.Remove();
 
@@ -2874,7 +2896,7 @@ namespace Oxide.Plugins
                 };
             }
 
-            public static VendingOffer FromItems(BasePlayer player, Item sellItem, Item currencyItem, Item settingsItem)
+            public static VendingOffer FromItems(CustomVendingSetup plugin, BasePlayer player, Item sellItem, Item currencyItem, Item settingsItem)
             {
                 var offer = new VendingOffer
                 {
@@ -2887,9 +2909,9 @@ namespace Oxide.Plugins
 
                 if (settingsItem != null)
                 {
-                    var refillMaxLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillMax);
-                    var refillDelayLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillDelay);
-                    var refillAmountLabel = _pluginInstance.GetMessage(player, Lang.SettingsRefillAmount);
+                    var refillMaxLabel = plugin.GetMessage(player, Lang.SettingsRefillMax);
+                    var refillDelayLabel = plugin.GetMessage(player, Lang.SettingsRefillDelay);
+                    var refillAmountLabel = plugin.GetMessage(player, Lang.SettingsRefillAmount);
 
                     var settings = ParseSettingsItem(settingsItem);
                     int refillMax, refillDelay, refillAmount;
@@ -2971,9 +2993,6 @@ namespace Oxide.Plugins
             }
 
             public bool IsValid => SellItem.IsValid && CurrencyItem.IsValid;
-
-            public bool HasConditionItem => (SellItem.GetItemSpec()?.HasCondition ?? false)
-                || (CurrencyItem.GetItemSpec()?.HasCondition ?? false);
         }
 
         [JsonObject(MemberSerialization.OptIn)]
@@ -3051,7 +3070,7 @@ namespace Oxide.Plugins
 
             public static SavedData Load()
             {
-                var data = Interface.Oxide.DataFileSystem.ReadObject<SavedData>(_pluginInstance.Name) ?? new SavedData();
+                var data = Interface.Oxide.DataFileSystem.ReadObject<SavedData>(nameof(CustomVendingSetup)) ?? new SavedData();
 
                 var dataMigrated = false;
 
@@ -3097,14 +3116,14 @@ namespace Oxide.Plugins
                     dataMigrated = data.Vendings.Count > 0;
                     data.Vendings = null;
                     data.Save();
-                    _pluginInstance.LogWarning($"Migrated data file to new format.");
+                    LogWarning($"Migrated data file to new format.");
                 }
 
                 return data;
             }
 
             public void Save() =>
-                Interface.Oxide.DataFileSystem.WriteObject<SavedData>(_pluginInstance.Name, this);
+                Interface.Oxide.DataFileSystem.WriteObject(nameof(CustomVendingSetup), this);
 
             public VendingProfile FindProfile(IMonumentRelativePosition location)
             {
@@ -3144,13 +3163,13 @@ namespace Oxide.Plugins
             [JsonProperty("Override item max stack sizes (shortname: amount)")]
             public Dictionary<string, int> ItemStackSizeOverrides = new Dictionary<string, int>();
 
-            public void Init(CustomVendingSetup pluginInstance)
+            public void Init()
             {
                 foreach (var entry in ItemStackSizeOverrides)
                 {
                     if (ItemManager.FindItemDefinition(entry.Key) == null)
                     {
-                        pluginInstance.LogError($"Invalid item in config: {entry.Key}");
+                        LogError($"Invalid item in config: {entry.Key}");
                         continue;
                     }
                 }
@@ -3172,7 +3191,7 @@ namespace Oxide.Plugins
 
         private Configuration GetDefaultConfig() => new Configuration();
 
-        #region Configuration Boilerplate
+        #region Configuration Helpers
 
         private class SerializableConfiguration
         {
@@ -3300,7 +3319,7 @@ namespace Oxide.Plugins
         private void ChatMessage(BasePlayer player, string messageName, params object[] args) =>
             player.ChatMessage(string.Format(GetMessage(player, messageName), args));
 
-        private class Lang
+        private static class Lang
         {
             public const string ButtonEdit = "Button.Edit";
             public const string ButtonReset = "Button.Reset";
