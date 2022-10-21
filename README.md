@@ -9,6 +9,8 @@
 - Saves customizations for future restarts and wipes, based on the vending machine's relative position to the monument
 - Synchronizes edits with copies of the vending machines at duplicate monuments
 - Compatible with NPC vending machines spawned at monuments by plugins such as [Monument Addons](https://umod.org/plugins/monument-addons)
+- Allows disabling vending machine map markers
+- Allows disabling delivery drone access
 - Supports blueprints, as well as items with custom skins and names
 - Supports attachments and other child items
 - Supports ammo type and amount
@@ -25,6 +27,7 @@ When you open an NPC vending machine at a monument, if you have permission, you 
 - Change display order by rearranging items in the container
 - Change stock settings by editing the note next to each item
 - Toggle whether the map marker is enabled by clicking on the broadcast icon (green = on, gray = off)
+- Toggle whether delivery drones can access the vending machine by clicking on the drone icon (green = on, gray = off)
 - Change the shop name by clicking on the bottom-right note and editing its contents (supports multiple lines)
 - Save the changes by clicking the "SAVE" button
 
@@ -54,7 +57,7 @@ Default configuration:
 ```
 
 - `Shop UI settings`
-  - `Enable skin overlays` (`true` or `false`) -- While `true`, skin images will be overlayed on top of items when needed.
+  - `Enable skin overlays` (`true` or `false`) -- While `true`, skin images will be overlayed on top of items when needed. For example, to display currency skin.
 - `Override item max stack sizes (shortname: amount)` -- This section allows you to override the max stack size of items that players can get when purchasing items, by item short name. This is intended to allow players to receive larger stacks of items from vending machines than they could receive from other sources. For example, if the max stack size of wood is `5000`, configuring a maximum of `10000` here will allow the player to acquire a single wood item with stack size `10000` (granted the vending machine has enough wood in stock).
   - This feature only applies to vending machines customized by this plugin.
   - This feature might not work with every stack size plugin. Worst case, editing these settings may have no effect.

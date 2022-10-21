@@ -18,7 +18,7 @@ using CustomSaveDataCallback = System.Action<Newtonsoft.Json.Linq.JObject>;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.7.1")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.8.0")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -52,6 +52,7 @@ namespace Oxide.Plugins
         private MonumentFinderAdapter _monumentFinderAdapter;
         private VendingMachineManager _vendingMachineManager;
         private BagOfHoldingLimitManager _bagOfHoldingLimitManager;
+        private DynamicHookSubscriber<BaseVendingController> _inaccessibleVendingMachines;
 
         private ItemDefinition _noteItemDefinition;
         private bool _isServerInitialized;
@@ -63,6 +64,7 @@ namespace Oxide.Plugins
             _componentFactory = new ComponentFactory<NPCVendingMachine, VendingMachineComponent>(this, _componentTracker);
             _vendingMachineManager = new VendingMachineManager(this, _componentFactory, _dataProviderRegistry);
             _bagOfHoldingLimitManager = new BagOfHoldingLimitManager(this);
+            _inaccessibleVendingMachines = new DynamicHookSubscriber<BaseVendingController>(this, nameof(CanAccessVendingMachine));
         }
 
         #endregion
@@ -77,6 +79,8 @@ namespace Oxide.Plugins
             permission.RegisterPermission(PermissionUse, this);
 
             Unsubscribe(nameof(OnEntitySpawned));
+
+            _inaccessibleVendingMachines.UnsubscribeAll();
         }
 
         private void OnServerInitialized()
@@ -401,6 +405,21 @@ namespace Oxide.Plugins
             return False;
         }
 
+        private object CanAccessVendingMachine(DeliveryDroneConfig deliveryDroneConfig, NPCVendingMachine vendingMachine)
+        {
+            if (!vendingMachine.IsBroadcasting())
+                return null;
+
+            var controller = _vendingMachineManager.GetController(vendingMachine);
+            if (controller == null)
+                return null;
+
+            if (_inaccessibleVendingMachines.Contains(controller))
+                return False;
+
+            return null;
+        }
+
         #endregion
 
         #region API
@@ -587,6 +606,7 @@ namespace Oxide.Plugins
             public const string Save = "save";
             public const string Cancel = "cancel";
             public const string ToggleBroadcast = "togglebroadcast";
+            public const string ToggleDroneAccessible = "toggledroneaccessible";
         }
 
         [Command("customvendingsetup.ui")]
@@ -626,6 +646,10 @@ namespace Oxide.Plugins
 
                 case UICommands.ToggleBroadcast:
                     vendingController.EditController?.ToggleBroadcast();
+                    break;
+
+                case UICommands.ToggleDroneAccessible:
+                    vendingController.EditController?.ToggleDroneAccessible();
                     break;
 
                 case UICommands.Save:
@@ -922,7 +946,9 @@ namespace Oxide.Plugins
 
             public const string TexturedBackgroundSprite = "assets/content/ui/ui.background.tiletex.psd";
             public const string BroadcastIcon = "assets/icons/broadcast.png";
+            public const string DroneIcon = "assets/icons/drone.png";
             public const string IconMaterial = "assets/icons/iconmaterial.mat";
+            public const string GreyOutMaterial = "assets/icons/greyout.mat";
 
             public const string AnchorMin = "0.5 0";
             public const string AnchorMax = "0.5 0";
@@ -930,15 +956,17 @@ namespace Oxide.Plugins
 
         private class EditFormState
         {
-            public static EditFormState FromVendingMachine(NPCVendingMachine vendingMachine)
+            public static EditFormState FromVendingMachine(BaseVendingController vendingController, NPCVendingMachine vendingMachine)
             {
                 return new EditFormState
                 {
-                    Broadcast = vendingMachine.IsBroadcasting(),
+                    Broadcast = vendingController.Profile?.Broadcast ?? vendingMachine.IsBroadcasting(),
+                    DroneAccessible = vendingController.Profile?.DroneAccessible ?? true,
                 };
             }
 
             public bool Broadcast;
+            public bool DroneAccessible;
         }
 
         private static class ContainerUIRenderer
@@ -947,6 +975,7 @@ namespace Oxide.Plugins
 
             public const string TipUIName = "CustomVendingSetup.ContainerUI.Tip";
             public const string BroadcastUIName = "CustomVendingSetup.ContainerUI.Broadcast";
+            public const string DroneUIName = "CustomVendingSetup.ContainerUI.Drone";
 
             public static string RenderContainerUI(CustomVendingSetup plugin, BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
             {
@@ -976,9 +1005,26 @@ namespace Oxide.Plugins
 
                 var vendingMachineId = vendingMachine.net.ID;
 
-                AddButton(cuiElements, vendingMachineId, saveButtonText, UICommands.Save, 1, UIConstants.SaveButtonColor, UIConstants.SaveButtonTextColor);
-                AddButton(cuiElements, vendingMachineId, cancelButtonText, UICommands.Cancel, 0, UIConstants.CancelButtonColor, UIConstants.CancelButtonTextColor);
+                AddButton(
+                    cuiElements,
+                    vendingMachineId,
+                    saveButtonText,
+                    UICommands.Save,
+                    UIConstants.PanelWidth - UIConstants.ButtonWidth - UIConstants.ButtonHorizontalSpacing,
+                    UIConstants.SaveButtonColor,
+                    UIConstants.SaveButtonTextColor
+                );
+                AddButton(
+                    cuiElements,
+                    vendingMachineId,
+                    cancelButtonText,
+                    UICommands.Cancel,
+                    UIConstants.PanelWidth,
+                    UIConstants.CancelButtonColor,
+                    UIConstants.CancelButtonTextColor
+                );
                 AddBroadcastButton(cuiElements, vendingMachine, uiState);
+                AddDroneButton(cuiElements, vendingMachine, uiState);
 
                 var headerOffset = -6;
 
@@ -1050,7 +1096,7 @@ namespace Oxide.Plugins
             {
                 var iconSize = UIConstants.ButtonHeight;
 
-                var xMax = GetButtonOffset(2);
+                var xMax = UIConstants.PanelWidth - 2 * (UIConstants.ButtonWidth + UIConstants.ButtonHorizontalSpacing);
                 var xMin = xMax - iconSize;
 
                 cuiElements.Add(
@@ -1100,21 +1146,72 @@ namespace Oxide.Plugins
                 );
             }
 
+            private static void AddDroneButton(CuiElementContainer cuiElements, NPCVendingMachine vendingMachine, EditFormState uiState)
+            {
+                var iconSize = UIConstants.ButtonHeight;
+
+                var xMax = - UIConstants.ButtonHorizontalSpacing;
+                var xMin = xMax - iconSize;
+
+                var droneAccessible = uiState.Broadcast && uiState.DroneAccessible;
+
+                cuiElements.Add(
+                    new CuiElement
+                    {
+                        Parent = BroadcastUIName,
+                        Name = DroneUIName,
+                        Components =
+                        {
+                            new CuiButtonComponent
+                            {
+                                Color = "0 0 0 0",
+                                Command = $"customvendingsetup.ui {vendingMachine.net.ID} {UICommands.ToggleDroneAccessible}",
+                            },
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = "0 0",
+                                AnchorMax = "0 0",
+                                OffsetMin = $"{xMin} 0",
+                                OffsetMax = $"{xMax} {UIConstants.ButtonHeight}",
+                            },
+                        },
+                    }
+                );
+
+                cuiElements.Add(
+                    new CuiElement
+                    {
+                        Parent = DroneUIName,
+                        Components =
+                        {
+                            new CuiImageComponent
+                            {
+                                Color = droneAccessible ? UIConstants.SaveButtonTextColor : UIConstants.CancelButtonTextColor,
+                                Sprite = UIConstants.DroneIcon,
+                                Material = UIConstants.GreyOutMaterial,
+                            },
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = "0 0",
+                                AnchorMax = "0 0",
+                                OffsetMin = "0 0",
+                                OffsetMax = $"{iconSize} {iconSize}",
+                            },
+                        },
+                    }
+                );
+            }
+
             public static string RenderBroadcastUI(BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
             {
                 var cuiElements = new CuiElementContainer();
                 AddBroadcastButton(cuiElements, vendingMachine, uiState);
+                AddDroneButton(cuiElements, vendingMachine, uiState);
                 return CuiHelper.ToJson(cuiElements);
             }
 
-            private static float GetButtonOffset(int buttonIndex)
+            private static void AddButton(CuiElementContainer cuiElements, uint vendingMachineId, string text, string subCommand, float xMax, string color, string textColor)
             {
-                return UIConstants.PanelWidth - buttonIndex * (UIConstants.ButtonWidth + UIConstants.ButtonHorizontalSpacing);
-            }
-
-            private static void AddButton(CuiElementContainer cuiElements, uint vendingMachineId, string text, string subCommand, int buttonIndex, string color, string textColor)
-            {
-                var xMax = GetButtonOffset(buttonIndex);
                 var xMin = xMax - UIConstants.ButtonWidth;
 
                 cuiElements.Add(
@@ -1714,6 +1811,60 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region Dynamic Hook Subscriptions
+
+        private class DynamicHookSubscriber<T>
+        {
+            private CustomVendingSetup _plugin;
+            private HashSet<T> _list = new HashSet<T>();
+            private string[] _hookNames;
+
+            public DynamicHookSubscriber(CustomVendingSetup plugin, params string[] hookNames)
+            {
+                _plugin = plugin;
+                _hookNames = hookNames;
+            }
+
+            public bool Contains(T item)
+            {
+                return _list.Contains(item);
+            }
+
+            public void Add(T item)
+            {
+                if (_list.Add(item) && _list.Count == 1)
+                {
+                    SubscribeAll();
+                }
+            }
+
+            public void Remove(T item)
+            {
+                if (_list.Remove(item) && _list.Count == 0)
+                {
+                    UnsubscribeAll();
+                }
+            }
+
+            public void SubscribeAll()
+            {
+                foreach (var hookName in _hookNames)
+                {
+                    _plugin.Subscribe(hookName);
+                }
+            }
+
+            public void UnsubscribeAll()
+            {
+                foreach (var hookName in _hookNames)
+                {
+                    _plugin.Unsubscribe(hookName);
+                }
+            }
+        }
+
+        #endregion
+
         #region Data Provider
 
         private class DataProvider
@@ -2043,7 +2194,7 @@ namespace Oxide.Plugins
                 var offers = vendingController.Profile?.Offers ?? GetOffersFromVendingMachine(vendingMachine);
 
                 _container = CreateOrdersContainer(plugin, editorPlayer, offers, vendingMachine.shopName);
-                _formState = EditFormState.FromVendingMachine(vendingMachine);
+                _formState = EditFormState.FromVendingMachine(vendingController, vendingMachine);
                 EditContainerComponent.AddToContainer(plugin, _container, this);
                 _container.SendAsSnapshot(editorPlayer.Connection);
                 OpenEditPanel(editorPlayer, _container);
@@ -2059,10 +2210,27 @@ namespace Oxide.Plugins
                 CuiHelper.AddUi(EditorPlayer, ContainerUIRenderer.RenderBroadcastUI(EditorPlayer, _vendingMachine, _formState));
             }
 
+            public void ToggleDroneAccessible()
+            {
+                if (!_formState.Broadcast)
+                {
+                    _formState.DroneAccessible = true;
+                    _formState.Broadcast = true;
+                }
+                else
+                {
+                    _formState.DroneAccessible = !_formState.DroneAccessible;
+                }
+
+                CuiHelper.DestroyUi(EditorPlayer, ContainerUIRenderer.BroadcastUIName);
+                CuiHelper.AddUi(EditorPlayer, ContainerUIRenderer.RenderBroadcastUI(EditorPlayer, _vendingMachine, _formState));
+            }
+
             public void ApplyStateTo(VendingProfile profile)
             {
                 profile.Offers = GetOffersFromContainer(_plugin, EditorPlayer, _container.inventory);
                 profile.Broadcast = _formState.Broadcast;
+                profile.DroneAccessible = _formState.DroneAccessible;
 
                 var updatedShopName = _container.inventory.GetSlot(ShopNameNoteSlot)?.text.Trim();
                 if (!string.IsNullOrEmpty(updatedShopName))
@@ -2153,6 +2321,7 @@ namespace Oxide.Plugins
                 Profile = null;
                 SetupVendingMachines();
                 EditController?.Kill();
+                _plugin._inaccessibleVendingMachines.Remove(this);
 
                 _cachedShopUI = null;
             }
@@ -2174,6 +2343,8 @@ namespace Oxide.Plugins
                 SetupVendingMachines();
 
                 _cachedShopUI = null;
+
+                UpdateDroneAccessibility();
             }
 
             public void AddVendingMachine(NPCVendingMachine vendingMachine)
@@ -2194,6 +2365,7 @@ namespace Oxide.Plugins
                 if (_vendingMachineList.Count == 0)
                 {
                     EditController?.Kill();
+                    _plugin._inaccessibleVendingMachines.Remove(this);
                 }
             }
 
@@ -2210,6 +2382,21 @@ namespace Oxide.Plugins
                 }
 
                 return _cachedShopUI;
+            }
+
+            public void UpdateDroneAccessibility()
+            {
+                if (Profile == null)
+                    return;
+
+                if (Profile.Broadcast && !Profile.DroneAccessible)
+                {
+                    _plugin._inaccessibleVendingMachines.Add(this);
+                }
+                else
+                {
+                    _plugin._inaccessibleVendingMachines.Remove(this);
+                }
             }
 
             protected virtual void CreateOrUpdateProfile(NPCVendingMachine vendingMachine)
@@ -2246,6 +2433,7 @@ namespace Oxide.Plugins
             {
                 DataProvider = dataProvider;
                 Profile = dataProvider.GetData();
+                UpdateDroneAccessibility();
             }
 
             protected override void SaveProfile(VendingProfile vendingProfile)
@@ -2271,6 +2459,7 @@ namespace Oxide.Plugins
             {
                 Location = location;
                 Profile = _pluginData.FindProfile(location);
+                UpdateDroneAccessibility();
             }
 
             protected override void SaveProfile(VendingProfile vendingProfile)
@@ -3016,6 +3205,10 @@ namespace Oxide.Plugins
             [JsonProperty("Broadcast", DefaultValueHandling = DefaultValueHandling.Ignore)]
             [DefaultValue(true)]
             public bool Broadcast = true;
+
+            [JsonProperty("DroneAccessible", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [DefaultValue(true)]
+            public bool DroneAccessible = true;
 
             [JsonProperty("Monument", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public string Monument;
