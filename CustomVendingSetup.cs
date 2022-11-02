@@ -25,7 +25,7 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        private Plugin BagOfHolding, InstantBuy, MonumentFinder, VendingInStock;
+        private Plugin BagOfHolding, InstantBuy, MonumentFinder;
 
         private SavedData _pluginData;
         private Configuration _pluginConfig;
