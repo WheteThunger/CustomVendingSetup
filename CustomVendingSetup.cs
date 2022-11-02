@@ -601,17 +601,17 @@ namespace Oxide.Plugins
                 return Interface.CallHook("OnCustomVendingSetupDataProvider", vendingMachine) as Dictionary<string, object>;
             }
 
-            public static void OnCustomVendingSetupOfferSettingsParse(Dictionary<string, string> localizedSettings, Dictionary<string, object> customSettings)
+            public static void OnCustomVendingSetupOfferSettingsParse(CaseInsensitiveDictionary<string> localizedSettings, CaseInsensitiveDictionary<object> customSettings)
             {
                 Interface.CallHook("OnCustomVendingSetupOfferSettingsParse", localizedSettings, customSettings);
             }
 
-            public static void OnCustomVendingSetupOfferSettingsDisplay(Dictionary<string, object> customSettings, Dictionary<string, string> localizedSettings)
+            public static void OnCustomVendingSetupOfferSettingsDisplay(CaseInsensitiveDictionary<object> customSettings, CaseInsensitiveDictionary<string> localizedSettings)
             {
                 Interface.CallHook("OnCustomVendingSetupOfferSettingsDisplay", customSettings, localizedSettings);
             }
 
-            public static void OnCustomVendingSetupTransactionWithCustomSettings(NPCVendingMachine vendingMachine, Dictionary<string, object> customSettings)
+            public static void OnCustomVendingSetupTransactionWithCustomSettings(NPCVendingMachine vendingMachine, CaseInsensitiveDictionary<object> customSettings)
             {
                 Interface.CallHook("OnCustomVendingSetupTransactionWithCustomSettings", vendingMachine, customSettings);
             }
@@ -838,7 +838,7 @@ namespace Oxide.Plugins
                 var refillDelayLabel = plugin.GetMessage(player, Lang.SettingsRefillDelay);
                 var refillAmountLabel = plugin.GetMessage(player, Lang.SettingsRefillAmount);
 
-                var settingsMap = new Dictionary<string, string>
+                var settingsMap = new CaseInsensitiveDictionary<string>
                 {
                     [refillMaxLabel] = (offer?.RefillMax ?? VendingOffer.DefaultRefillMax).ToString(),
                     [refillDelayLabel] = (offer?.RefillDelay ?? VendingOffer.DefaultRefillDelay).ToString(),
@@ -847,7 +847,7 @@ namespace Oxide.Plugins
 
                 // Allow other plugins to parse the custom settings and display localized options.
                 ExposedHooks.OnCustomVendingSetupOfferSettingsDisplay(
-                    offer?.CustomSettings ?? new Dictionary<string, object>(), settingsMap);
+                    offer?.CustomSettings ?? new CaseInsensitiveDictionary<object>(), settingsMap);
 
                 settingsItem.text = CreateNoteContents(settingsMap);
 
@@ -2963,6 +2963,11 @@ namespace Oxide.Plugins
 
         #region Saved Data
 
+        private class CaseInsensitiveDictionary<TValue> : Dictionary<string, TValue>
+        {
+            public CaseInsensitiveDictionary() : base(StringComparer.OrdinalIgnoreCase) {}
+        }
+
         [JsonObject(MemberSerialization.OptIn)]
         private class VendingItem
         {
@@ -3157,7 +3162,7 @@ namespace Oxide.Plugins
 
                     // Allow other plugins to parse the settings and populate custom settings.
                     // Other plugins determine data file keys, as well as localized option names.
-                    var customSettings = new Dictionary<string, object>();
+                    var customSettings = new CaseInsensitiveDictionary<object>();
                     ExposedHooks.OnCustomVendingSetupOfferSettingsParse(localizedSettings, customSettings);
                     if (customSettings.Count > 0)
                     {
@@ -3168,9 +3173,9 @@ namespace Oxide.Plugins
                 return offer;
             }
 
-            private static Dictionary<string, string> ParseSettingsItem(Item settingsItem)
+            private static CaseInsensitiveDictionary<string> ParseSettingsItem(Item settingsItem)
             {
-                var dict = new Dictionary<string, string>();
+                var dict = new CaseInsensitiveDictionary<string>();
                 if (string.IsNullOrEmpty(settingsItem.text))
                     return dict;
 
@@ -3213,7 +3218,7 @@ namespace Oxide.Plugins
             public int RefillAmount = DefaultRefillAmount;
 
             [JsonProperty("CustomSettings", DefaultValueHandling = DefaultValueHandling.Ignore)]
-            public Dictionary<string, object> CustomSettings;
+            public CaseInsensitiveDictionary<object> CustomSettings;
 
             public bool IsValid => SellItem.IsValid && CurrencyItem.IsValid;
         }
