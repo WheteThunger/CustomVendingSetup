@@ -312,7 +312,7 @@ namespace Oxide.Plugins
                     var itemToGive1 = sellItemSpec.Split(sellableItem, maxStackSize);
                     amountToGive -= itemToGive1.amount;
 
-                    object canPurchaseHookResult1 = CallHookCanPurchaseItem(player, itemToGive1, marketTerminal?._onItemPurchasedCached, vendingMachine, targetContainer);
+                    object canPurchaseHookResult1 = ExposedHooks.CanPurchaseItem(player, itemToGive1, marketTerminal?._onItemPurchasedCached, vendingMachine, targetContainer);
                     if (canPurchaseHookResult1 is bool)
                     {
                         Facepunch.Pool.FreeList(ref sellableItems);
@@ -328,7 +328,7 @@ namespace Oxide.Plugins
 
                 amountToGive -= itemToGive2.amount;
 
-                object canPurchaseHookResult2 = CallHookCanPurchaseItem(player, itemToGive2, marketTerminal?._onItemPurchasedCached, vendingMachine, targetContainer);
+                object canPurchaseHookResult2 = ExposedHooks.CanPurchaseItem(player, itemToGive2, marketTerminal?._onItemPurchasedCached, vendingMachine, targetContainer);
                 if (canPurchaseHookResult2 is bool)
                 {
                     Facepunch.Pool.FreeList(ref sellableItems);
@@ -579,20 +579,22 @@ namespace Oxide.Plugins
 
         #region Exposed Hooks
 
-        private static bool SetupVendingMachineWasBlocked(NPCVendingMachine vendingMachine)
+        private static class ExposedHooks
         {
-            object hookResult = Interface.CallHook("OnCustomVendingSetup", vendingMachine);
-            return hookResult is bool && (bool)hookResult == false;
-        }
+            public static object OnCustomVendingSetup(NPCVendingMachine vendingMachine)
+            {
+                return Interface.CallHook("OnCustomVendingSetup", vendingMachine);
+            }
 
-        private static object CallHookCanPurchaseItem(BasePlayer player, Item item, Action<BasePlayer, Item> onItemPurchased, NPCVendingMachine vendingMachine, ItemContainer targetContainer)
-        {
-            return Interface.CallHook("CanPurchaseItem", player, item, onItemPurchased, vendingMachine, targetContainer);
-        }
+            public static object CanPurchaseItem(BasePlayer player, Item item, Action<BasePlayer, Item> onItemPurchased, NPCVendingMachine vendingMachine, ItemContainer targetContainer)
+            {
+                return Interface.CallHook("CanPurchaseItem", player, item, onItemPurchased, vendingMachine, targetContainer);
+            }
 
-        private static Dictionary<string, object> CallHookDataProvider(NPCVendingMachine vendingMachine)
-        {
-            return Interface.CallHook("OnCustomVendingSetupDataProvider", vendingMachine) as Dictionary<string, object>;
+            public static Dictionary<string, object> OnCustomVendingSetupDataProvider(NPCVendingMachine vendingMachine)
+            {
+                return Interface.CallHook("OnCustomVendingSetupDataProvider", vendingMachine) as Dictionary<string, object>;
+            }
         }
 
         #endregion
@@ -1994,7 +1996,7 @@ namespace Oxide.Plugins
 
                 BaseVendingController controller = null;
 
-                var dataProviderSpec = CallHookDataProvider(vendingMachine);
+                var dataProviderSpec = ExposedHooks.OnCustomVendingSetupDataProvider(vendingMachine);
                 if (dataProviderSpec != null)
                 {
                     var dataProvider = _dataProviderRegistry.Register(dataProviderSpec);
@@ -2004,10 +2006,9 @@ namespace Oxide.Plugins
                         return;
                     }
 
-                    if (SetupVendingMachineWasBlocked(vendingMachine))
-                    {
+                    var hookResult = ExposedHooks.OnCustomVendingSetup(vendingMachine);
+                    if (hookResult is bool && !(bool)hookResult)
                         return;
-                    }
 
                     controller = EnsureCustomController(dataProvider);
                 }
@@ -2020,10 +2021,9 @@ namespace Oxide.Plugins
                         return;
                     }
 
-                    if (SetupVendingMachineWasBlocked(vendingMachine))
-                    {
+                    var hookResult = ExposedHooks.OnCustomVendingSetup(vendingMachine);
+                    if (hookResult is bool && !(bool)hookResult)
                         return;
-                    }
 
                     controller = EnsureMonumentController(location);
                 }
