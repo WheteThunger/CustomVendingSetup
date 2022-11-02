@@ -3158,29 +3158,6 @@ namespace Oxide.Plugins
             [DefaultValue(DefaultRefillAmount)]
             public int RefillAmount = DefaultRefillAmount;
 
-            private SellOrder _sellOrder;
-            public SellOrder SellOrder
-            {
-                get
-                {
-                    if (_sellOrder == null)
-                    {
-                        _sellOrder = new SellOrder
-                        {
-                            ShouldPool = false,
-                            itemToSellID = SellItem.TargetItemId,
-                            itemToSellAmount = SellItem.Amount,
-                            itemToSellIsBP = SellItem.IsBlueprint,
-                            currencyID = CurrencyItem.TargetItemId,
-                            currencyAmountPerItem = CurrencyItem.Amount,
-                            currencyIsBP = CurrencyItem.IsBlueprint,
-                        };
-                    }
-
-                    return _sellOrder;
-                }
-            }
-
             public bool IsValid => SellItem.IsValid && CurrencyItem.IsValid;
         }
 
