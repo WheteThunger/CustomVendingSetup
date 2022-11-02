@@ -357,6 +357,11 @@ namespace Oxide.Plugins
                 }
             }
 
+            if (offer.CustomSettings?.Count > 0)
+            {
+                ExposedHooks.OnCustomVendingSetupTransactionWithCustomSettings(vendingMachine, offer.CustomSettings);
+            }
+
             return True;
         }
 
@@ -604,6 +609,11 @@ namespace Oxide.Plugins
             public static void OnCustomVendingSetupOfferSettingsDisplay(Dictionary<string, object> customSettings, Dictionary<string, string> localizedSettings)
             {
                 Interface.CallHook("OnCustomVendingSetupOfferSettingsDisplay", customSettings, localizedSettings);
+            }
+
+            public static void OnCustomVendingSetupTransactionWithCustomSettings(NPCVendingMachine vendingMachine, Dictionary<string, object> customSettings)
+            {
+                Interface.CallHook("OnCustomVendingSetupTransactionWithCustomSettings", vendingMachine, customSettings);
             }
         }
 
