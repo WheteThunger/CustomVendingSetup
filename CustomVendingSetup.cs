@@ -595,6 +595,16 @@ namespace Oxide.Plugins
             {
                 return Interface.CallHook("OnCustomVendingSetupDataProvider", vendingMachine) as Dictionary<string, object>;
             }
+
+            public static void OnCustomVendingSetupOfferSettingsParse(Dictionary<string, string> localizedSettings, Dictionary<string, object> customSettings)
+            {
+                Interface.CallHook("OnCustomVendingSetupOfferSettingsParse", localizedSettings, customSettings);
+            }
+
+            public static void OnCustomVendingSetupOfferSettingsDisplay(Dictionary<string, object> customSettings, Dictionary<string, string> localizedSettings)
+            {
+                Interface.CallHook("OnCustomVendingSetupOfferSettingsDisplay", customSettings, localizedSettings);
+            }
         }
 
         #endregion
@@ -760,6 +770,16 @@ namespace Oxide.Plugins
             return (orderIndex % MaxItemRows) * ItemsPerRow + 3;
         }
 
+        private static string CreateNoteContents(Dictionary<string, string> settingsMap)
+        {
+            var lines = new List<string>();
+            foreach (var entry in settingsMap)
+            {
+                lines.Add($"{entry.Key}: {entry.Value}");
+            }
+            return string.Join("\n", lines);
+        }
+
         private static StorageContainer CreateOrdersContainer(CustomVendingSetup plugin, BasePlayer player, VendingOffer[] vendingOffers, string shopName)
         {
             var containerEntity = CreateContainerEntity(StoragePrefab);
@@ -808,9 +828,18 @@ namespace Oxide.Plugins
                 var refillDelayLabel = plugin.GetMessage(player, Lang.SettingsRefillDelay);
                 var refillAmountLabel = plugin.GetMessage(player, Lang.SettingsRefillAmount);
 
-                settingsItem.text = $"{refillMaxLabel}: {offer?.RefillMax ?? VendingOffer.DefaultRefillMax}"
-                    + $"\n{refillDelayLabel}: {offer?.RefillDelay ?? VendingOffer.DefaultRefillDelay}"
-                    + $"\n{refillAmountLabel}: {offer?.RefillAmount ?? VendingOffer.DefaultRefillAmount}";
+                var settingsMap = new Dictionary<string, string>
+                {
+                    [refillMaxLabel] = (offer?.RefillMax ?? VendingOffer.DefaultRefillMax).ToString(),
+                    [refillDelayLabel] = (offer?.RefillDelay ?? VendingOffer.DefaultRefillDelay).ToString(),
+                    [refillAmountLabel] = (offer?.RefillAmount ?? VendingOffer.DefaultRefillAmount).ToString(),
+                };
+
+                // Allow other plugins to parse the custom settings and display localized options.
+                ExposedHooks.OnCustomVendingSetupOfferSettingsDisplay(
+                    offer?.CustomSettings ?? new Dictionary<string, object>(), settingsMap);
+
+                settingsItem.text = CreateNoteContents(settingsMap);
 
                 var destinationSlot = OrderIndexToSlot(orderIndex);
 
@@ -3102,25 +3131,36 @@ namespace Oxide.Plugins
                     var refillDelayLabel = plugin.GetMessage(player, Lang.SettingsRefillDelay);
                     var refillAmountLabel = plugin.GetMessage(player, Lang.SettingsRefillAmount);
 
-                    var settings = ParseSettingsItem(settingsItem);
-                    int refillMax, refillDelay, refillAmount;
+                    var localizedSettings = ParseSettingsItem(settingsItem);
 
-                    if (settings.TryGetValue(refillMaxLabel, out refillMax))
+                    int refillMax;
+                    if (TryParseIntKey(localizedSettings, refillMaxLabel, out refillMax))
                         offer.RefillMax = refillMax;
 
-                    if (settings.TryGetValue(refillDelayLabel, out refillDelay))
+                    int refillDelay;
+                    if (TryParseIntKey(localizedSettings, refillDelayLabel, out refillDelay))
                         offer.RefillDelay = refillDelay;
 
-                    if (settings.TryGetValue(refillAmountLabel, out refillAmount))
+                    int refillAmount;
+                    if (TryParseIntKey(localizedSettings, refillAmountLabel, out refillAmount))
                         offer.RefillAmount = refillAmount;
+
+                    // Allow other plugins to parse the settings and populate custom settings.
+                    // Other plugins determine data file keys, as well as localized option names.
+                    var customSettings = new Dictionary<string, object>();
+                    ExposedHooks.OnCustomVendingSetupOfferSettingsParse(localizedSettings, customSettings);
+                    if (customSettings.Count > 0)
+                    {
+                        offer.CustomSettings = customSettings;
+                    }
                 }
 
                 return offer;
             }
 
-            private static Dictionary<string, int> ParseSettingsItem(Item settingsItem)
+            private static Dictionary<string, string> ParseSettingsItem(Item settingsItem)
             {
-                var dict = new Dictionary<string, int>();
+                var dict = new Dictionary<string, string>();
                 if (string.IsNullOrEmpty(settingsItem.text))
                     return dict;
 
@@ -3130,14 +3170,18 @@ namespace Oxide.Plugins
                     if (parts.Length < 2)
                         continue;
 
-                    int value;
-                    if (!int.TryParse(parts[1], out value))
-                        continue;
-
-                    dict[parts[0].Trim()] = value;
+                    dict[parts[0].Trim()] = parts[1].Trim();
                 }
 
                 return dict;
+            }
+
+            private static bool TryParseIntKey(Dictionary<string, string> dict, string key, out int result)
+            {
+                result = 0;
+                string stringValue;
+                return dict.TryGetValue(key, out stringValue)
+                    && int.TryParse(stringValue, out result);
             }
 
             [JsonProperty("SellItem")]
@@ -3157,6 +3201,9 @@ namespace Oxide.Plugins
             [JsonProperty("RefillAmount", DefaultValueHandling = DefaultValueHandling.Ignore)]
             [DefaultValue(DefaultRefillAmount)]
             public int RefillAmount = DefaultRefillAmount;
+
+            [JsonProperty("CustomSettings", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public Dictionary<string, object> CustomSettings;
 
             public bool IsValid => SellItem.IsValid && CurrencyItem.IsValid;
         }
