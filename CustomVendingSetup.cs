@@ -313,7 +313,6 @@ namespace Oxide.Plugins
 
             Facepunch.Pool.FreeList(ref currencyItems);
 
-            // Perform instant restock if VendingInStock is loaded, since we are replacing its behavior.
             if (offer.RefillDelay == 0)
             {
                 sellableItems[0].amount += amountRequested;
