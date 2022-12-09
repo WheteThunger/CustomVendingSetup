@@ -102,9 +102,28 @@ As a prerequisite, the custom monument must use the monument marker prefab and h
 
 #### Why do some items show more stock than configured?
 
-This can happen for vending machines that sell the same item for multiple amounts. For example, if a vending machine sells `1000` stones for `50` scrap, and `500` stones for `1000 wood` wood, if configured to stock `10` for both, the total amount stocked will be `10000` stones, meaning the player can purchase `10` purchases of the `1000`, or `20` purchases of `500`. This happens because each vending machine uses a single stock container for all items it sells.
+This can happen for vending machines that sell an item for multiple amounts (e.g., scrap to **wood**, and stones to **wood**). This happens because each vending machine uses a single stock container for all items it sells, so it will try to stock the amount required for whichever sale offer requires the most stock.
 
-If you want to avoid this behavior, increase the restock amount for items sold at smaller amounts, or decrease the restock amount for items sold at higher amounts. For example, if selling `500` stones with `20` amount, sell `1000` stones for `10` amount.
+If you want all items to show the same quantity in stock (e.g., 10 in stock), you can alter the sell amount and currency amount so that the sell amount matches other listings of the same item.
+
+Example problem:
+
+- 1000 wood for 20 scrap (shows 10 in stock)
+- 500 wood for 150 stones (shows 20 in stock)
+
+Example solution A (stocks 10k wood total):
+
+- 1000 wood for 20 scrap (shows 10 in stock)
+- 1000 wood for 300 stones (shows 10 in stock)
+
+Example solution B (stocks 5k wood total):
+
+- 500 wood for 10 scrap (shows 10 in stock)
+- 500 wood for 150 stones (shows 10 in stock)
+
+#### Why is stock different than vanilla?
+
+This can happen for vending machines that sell an item for multiple amounts (e.g., scrap to **wood**, and stones to **wood**). This happens because vanilla stocking logic has inconsistencies which are fixed in the plugin's stocking logic.
 
 #### How do I display custom item names?
 
@@ -150,7 +169,7 @@ Dictionary<string, object> OnCustomVendingSetupDataProvider(NPCVendingMachine ve
 - Returning a valid dictionary will override where the plugin retrieves/saves data
 - Returning `null` will result in the default behavior
 
-The dictonary should contain the following keys.
+The dictionary should contain the following keys.
 - `"GetData"` -- A method that Custom Vending Setup will call to retrieve data for this vending machine.
   - Type: `System.Func<JObject>`
 - `"SaveData"` -- A method that Custom Vending Setup will call to save data after the vending machine offers have been edited or reset.
