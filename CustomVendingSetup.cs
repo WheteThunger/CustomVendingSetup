@@ -25,7 +25,7 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        private Plugin BagOfHolding, InstantBuy, MonumentFinder;
+        private Plugin BagOfHolding, InstantBuy, ItemRetriever, MonumentFinder;
 
         private SavedData _pluginData;
         private Configuration _pluginConfig;
@@ -46,6 +46,7 @@ namespace Oxide.Plugins
         private readonly object True = true;
         private readonly object False = false;
 
+        private ItemRetrieverAdapter _itemRetrieverAdapter;
         private DataProviderRegistry _dataProviderRegistry = new DataProviderRegistry();
         private ComponentTracker<NPCVendingMachine, VendingMachineComponent> _componentTracker = new ComponentTracker<NPCVendingMachine, VendingMachineComponent>();
         private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
@@ -61,6 +62,7 @@ namespace Oxide.Plugins
         public CustomVendingSetup()
         {
             _monumentFinderAdapter = new MonumentFinderAdapter(this);
+            _itemRetrieverAdapter = new ItemRetrieverAdapter(this);
             _componentFactory = new ComponentFactory<NPCVendingMachine, VendingMachineComponent>(this, _componentTracker);
             _vendingMachineManager = new VendingMachineManager(this, _componentFactory, _dataProviderRegistry);
             _bagOfHoldingLimitManager = new BagOfHoldingLimitManager(this);
@@ -113,6 +115,11 @@ namespace Oxide.Plugins
                 });
             }
 
+            if (ItemRetriever != null)
+            {
+                _itemRetrieverAdapter.HandleItemRetrieverLoaded();
+            }
+
             _bagOfHoldingLimitManager.OnServerInitialized();
 
             Subscribe(nameof(OnEntitySpawned));
@@ -143,6 +150,20 @@ namespace Oxide.Plugins
 
                 case nameof(BagOfHolding):
                     _bagOfHoldingLimitManager.HandleBagOfHoldingLoadedChanged();
+                    return;
+
+                case nameof(ItemRetriever):
+                    _itemRetrieverAdapter.HandleItemRetrieverLoaded();
+                    return;
+            }
+        }
+
+        private void OnPluginUnloaded(Plugin plugin)
+        {
+            switch (plugin.Name)
+            {
+                case nameof(ItemRetriever):
+                    _itemRetrieverAdapter.HandleItemRetrieverUnloaded();
                     return;
             }
         }
@@ -201,10 +222,10 @@ namespace Oxide.Plugins
             }
 
             // Get all item stacks in the vending machine that match the sold item.
-            var sellableItems = Facepunch.Pool.GetList<Item>();
-            var amountAvailable = 0;
             var sellItemSpec = offer.SellItem.GetItemSpec().Value;
-            sellItemSpec.FindAllInContainer(vendingMachine.inventory, sellableItems, ref amountAvailable, MatchOptions.Skin);
+            var sellableItems = Facepunch.Pool.GetList<Item>();
+            int sellableAmount;
+            FindSellableItems(vendingMachine, ref sellItemSpec, sellableItems, out sellableAmount);
             if (sellableItems.Count == 0)
             {
                 Facepunch.Pool.FreeList(ref sellableItems);
@@ -214,23 +235,17 @@ namespace Oxide.Plugins
             // Verify the vending machine has sufficient stock.
             numberOfTransactions = Mathf.Clamp(numberOfTransactions, 1, sellableItems[0].hasCondition ? 1 : 1000000);
             var amountRequested = offer.SellItem.Amount * numberOfTransactions;
-            if (amountRequested > amountAvailable)
+            if (amountRequested > sellableAmount)
             {
                 Facepunch.Pool.FreeList(ref sellableItems);
                 return False;
             }
 
             // Get all item stacks in the player inventory that match the currency item.
-            var currencyItems = Facepunch.Pool.GetList<Item>();
-            var currencyAvailable = 0;
             var currencyItemSpec = offer.CurrencyItem.GetItemSpec().Value;
-            var currencyMatchOptions = MatchOptions.Empty;
-            if (currencyItemSpec.Skin != 0)
-            {
-                // Require skin to match if not default skin.
-                currencyMatchOptions |= MatchOptions.Skin;
-            }
-            currencyItemSpec.FindAllInInventory(player.inventory, currencyItems, ref currencyAvailable, currencyMatchOptions);
+            var currencyItems = Facepunch.Pool.GetList<Item>();
+            int usableCurrencyAmount;
+            FindCurrencyItems(player, ref currencyItemSpec, currencyItems, out usableCurrencyAmount);
             if (currencyItems.Count == 0)
             {
                 Facepunch.Pool.FreeList(ref sellableItems);
@@ -240,7 +255,7 @@ namespace Oxide.Plugins
 
             // Verify the player has enough currency.
             var currencyRequired = offer.CurrencyItem.Amount * numberOfTransactions;
-            if (currencyAvailable < currencyRequired)
+            if (usableCurrencyAmount < currencyRequired)
             {
                 Facepunch.Pool.FreeList(ref sellableItems);
                 Facepunch.Pool.FreeList(ref currencyItems);
@@ -249,22 +264,25 @@ namespace Oxide.Plugins
 
             var marketTerminal = targetContainer?.entityOwner as MarketTerminal;
 
-            // Temporarily allow the vending machine internal storage to accept items.
-            // Currency items are temporarily added to the vending machine internal storage before deleting.
+            // (Old reason) Temporarily allow the vending machine internal storage to accept items.
+            // (Old reason) Currency items are temporarily added to the vending machine internal storage before deleting.
+            // Setting this flag is no longer necessary for the original reason because this plugin no longer allows
+            // currency to enter the vending machine, to avoid increasing stock (in case currency is also a sold item).
+            // Keeping this flag in case other plugins depend on it.
             vendingMachine.transactionActive = true;
 
             var currencyToTake = currencyRequired;
 
             foreach (var currencyItem in currencyItems)
             {
-                var useableAmount = (currencyItem.contents?.itemList?.Count ?? 0) > 0
+                var usableAmount = (currencyItem.contents?.itemList?.Count ?? 0) > 0
                     ? currencyItem.amount - 1
                     : currencyItem.amount;
 
-                if (useableAmount <= 0)
+                if (usableAmount <= 0)
                     continue;
 
-                var amountToTake = Mathf.Min(currencyToTake, useableAmount);
+                var amountToTake = Mathf.Min(currencyToTake, usableAmount);
                 currencyToTake -= amountToTake;
 
                 var itemToTake = currencyItem.amount > amountToTake
@@ -312,7 +330,7 @@ namespace Oxide.Plugins
                     var itemToGive1 = sellItemSpec.Split(sellableItem, maxStackSize);
                     amountToGive -= itemToGive1.amount;
 
-                    object canPurchaseHookResult1 = ExposedHooks.CanPurchaseItem(player, itemToGive1, marketTerminal?._onItemPurchasedCached, vendingMachine, targetContainer);
+                    var canPurchaseHookResult1 = ExposedHooks.CanPurchaseItem(player, itemToGive1, marketTerminal?._onItemPurchasedCached, vendingMachine, targetContainer);
                     if (canPurchaseHookResult1 is bool)
                     {
                         Facepunch.Pool.FreeList(ref sellableItems);
@@ -328,7 +346,7 @@ namespace Oxide.Plugins
 
                 amountToGive -= itemToGive2.amount;
 
-                object canPurchaseHookResult2 = ExposedHooks.CanPurchaseItem(player, itemToGive2, marketTerminal?._onItemPurchasedCached, vendingMachine, targetContainer);
+                var canPurchaseHookResult2 = ExposedHooks.CanPurchaseItem(player, itemToGive2, marketTerminal?._onItemPurchasedCached, vendingMachine, targetContainer);
                 if (canPurchaseHookResult2 is bool)
                 {
                     Facepunch.Pool.FreeList(ref sellableItems);
@@ -502,7 +520,6 @@ namespace Oxide.Plugins
         {
             private CustomVendingSetup _plugin;
             private Plugin _monumentFinder => _plugin.MonumentFinder;
-            private bool _isLoaded => _monumentFinder != null;
 
             public MonumentFinderAdapter(CustomVendingSetup plugin)
             {
@@ -577,6 +594,40 @@ namespace Oxide.Plugins
                     return;
 
                 _plugin.BagOfHolding.Call("API_RemoveLimitProfile", container);
+            }
+        }
+
+        private class ItemRetrieverApi
+        {
+            public Action<BasePlayer, List<Item>, Func<Item, int>> FindPlayerItems { get; }
+
+            public ItemRetrieverApi(Dictionary<string, object> apiDict)
+            {
+                FindPlayerItems = apiDict[nameof(FindPlayerItems)] as Action<BasePlayer, List<Item>, Func<Item, int>>;
+            }
+        }
+
+        private class ItemRetrieverAdapter
+        {
+            public ItemRetrieverApi Api { get; private set; }
+
+            private CustomVendingSetup _plugin;
+
+            private Plugin ItemRetriever => _plugin.ItemRetriever;
+
+            public ItemRetrieverAdapter(CustomVendingSetup plugin)
+            {
+                _plugin = plugin;
+            }
+
+            public void HandleItemRetrieverLoaded()
+            {
+                Api = new ItemRetrieverApi(ItemRetriever.Call("API_GetApi") as Dictionary<string, object>);
+            }
+
+            public void HandleItemRetrieverUnloaded()
+            {
+                Api = null;
             }
         }
 
@@ -918,6 +969,50 @@ namespace Oxide.Plugins
             }
 
             marketTerminal?._onItemPurchasedCached?.Invoke(player, item);
+        }
+
+        private void FindSellableItems(NPCVendingMachine vendingMachine, ref ItemSpec sellItemSpec, List<Item> sellableItems, out int usableAmount)
+        {
+            sellItemSpec.FindAllInContainer(vendingMachine.inventory, sellableItems, MatchOptions.Skin);
+
+            usableAmount = 0;
+
+            foreach (var item in sellableItems)
+            {
+                usableAmount += item.amount;
+            }
+        }
+
+        private void FindCurrencyItems(BasePlayer player, ref ItemSpec currencyItemSpec, List<Item> currencyItems, out int usableAmount)
+        {
+            var currencyMatchOptions = MatchOptions.Empty;
+            if (currencyItemSpec.Skin != 0)
+            {
+                // Require skin to match if not default skin.
+                currencyMatchOptions |= MatchOptions.Skin;
+            }
+
+            usableAmount = 0;
+
+            if (_itemRetrieverAdapter.Api != null)
+            {
+                var getUsableAmount = UsableItemCounter.Get(currencyItemSpec, currencyMatchOptions);
+                _itemRetrieverAdapter.Api.FindPlayerItems(player, currencyItems, getUsableAmount);
+
+                foreach (var item in currencyItems)
+                {
+                    usableAmount += getUsableAmount(item);
+                }
+            }
+            else
+            {
+                currencyItemSpec.FindAllInInventory(player.inventory, currencyItems, currencyMatchOptions);
+
+                foreach (var item in currencyItems)
+                {
+                    usableAmount += currencyItemSpec.GetUsableAmount(item, currencyMatchOptions);
+                }
+            }
         }
 
         private bool PassesUICommandChecks(IPlayer player, string[] args, out NPCVendingMachine vendingMachine, out BaseVendingController controller)
@@ -1580,10 +1675,36 @@ namespace Oxide.Plugins
             public Vector3 GetLegacyPosition() => _legacyPosition;
         }
 
+        [Flags]
         private enum MatchOptions
         {
             Skin = 1 << 0,
             Empty = 2 << 0,
+        }
+
+        private static class UsableItemCounter
+        {
+            private static ItemSpec _itemSpec;
+            private static MatchOptions _matchOptions;
+            private static float _minCondition;
+
+            private static Func<Item, int> _getUsableAmount = item =>
+            {
+                if (!_itemSpec.Matches(item, _matchOptions, _minCondition))
+                    return 0;
+
+                return (_matchOptions & MatchOptions.Empty) != 0 && (item.contents?.itemList?.Count ?? 0) > 0
+                    ? item.amount - 1
+                    : item.amount;
+            };
+
+            public static Func<Item, int> Get(ItemSpec itemSpec, MatchOptions matchOptions, float minCondition = 0)
+            {
+                _itemSpec = itemSpec;
+                _matchOptions = matchOptions;
+                _minCondition = minCondition;
+                return _getUsableAmount;
+            }
         }
 
         private struct ItemSpec
@@ -1670,9 +1791,6 @@ namespace Oxide.Plugins
             }
 
             public bool IsBlueprint => BlueprintTarget != 0;
-
-            public bool HasCondition => Definition.condition.enabled
-                && Definition.condition.max > 0;
 
             public Item Create(int amount)
             {
@@ -1800,7 +1918,7 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            public int GetAmountInContainer(ItemContainer container, MatchOptions matchOptions)
+            public int SumInContainer(ItemContainer container, MatchOptions matchOptions)
             {
                 var count = 0;
 
@@ -1808,45 +1926,42 @@ namespace Oxide.Plugins
                 {
                     if (Matches(item, matchOptions))
                     {
-                        var useableAmount = GetUseableAmount(item, matchOptions);
-                        if (useableAmount <= 0)
+                        var usableAmount = GetUsableAmount(item, matchOptions);
+                        if (usableAmount <= 0)
                             continue;
 
-                        count += item.amount;
+                        count += usableAmount;
                     }
                 }
 
                 return count;
             }
 
-            public void FindAllInContainer(ItemContainer container, List<Item> resultItemList, ref int sum, MatchOptions matchOptions, float minCondition = 0)
+            public void FindAllInContainer(ItemContainer container, List<Item> resultItemList, MatchOptions matchOptions, float minCondition = 0)
             {
                 foreach (var item in container.itemList)
                 {
                     if (Matches(item, matchOptions, minCondition))
                     {
-                        var useableAmount = GetUseableAmount(item, matchOptions);
-                        if (useableAmount <= 0)
+                        var usableAmount = GetUsableAmount(item, matchOptions);
+                        if (usableAmount <= 0)
                             continue;
 
                         resultItemList.Add(item);
-                        sum += useableAmount;
                     }
                 }
             }
 
-            public void FindAllInInventory(PlayerInventory playerInventory, List<Item> resultItemList, ref int sum, MatchOptions matchOptions)
+            public void FindAllInInventory(PlayerInventory playerInventory, List<Item> resultItemList, MatchOptions matchOptions)
             {
-                FindAllInContainer(playerInventory.containerMain, resultItemList, ref sum, matchOptions, minCondition: 0.5f);
-                FindAllInContainer(playerInventory.containerBelt, resultItemList, ref sum, matchOptions, minCondition: 0.5f);
-                FindAllInContainer(playerInventory.containerWear, resultItemList, ref sum, matchOptions, minCondition: 0.5f);
+                FindAllInContainer(playerInventory.containerMain, resultItemList, matchOptions, minCondition: 0.5f);
+                FindAllInContainer(playerInventory.containerBelt, resultItemList, matchOptions, minCondition: 0.5f);
+                FindAllInContainer(playerInventory.containerWear, resultItemList, matchOptions, minCondition: 0.5f);
             }
 
-            private int GetUseableAmount(Item item, MatchOptions matchOptions)
+            public int GetUsableAmount(Item item, MatchOptions matchOptions)
             {
-                return (matchOptions & MatchOptions.Empty) != 0 && (item.contents?.itemList?.Count ?? 0) > 0
-                    ? item.amount - 1
-                    : item.amount;
+                return UsableItemCounter.Get(this, matchOptions)(item);
             }
         }
 
@@ -2793,7 +2908,7 @@ namespace Oxide.Plugins
                     }
 
                     var itemSpec = offer.SellItem.GetItemSpec().Value;
-                    var totalAmountOfItem = itemSpec.GetAmountInContainer(_vendingMachine.inventory, MatchOptions.Skin);
+                    var totalAmountOfItem = itemSpec.SumInContainer(_vendingMachine.inventory, MatchOptions.Skin);
                     var numPurchasesInStock = totalAmountOfItem / offer.SellItem.Amount;
                     var refillNumberOfPurchases = offer.RefillMax - numPurchasesInStock;
 
