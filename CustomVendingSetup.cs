@@ -1678,7 +1678,7 @@ namespace Oxide.Plugins
         private enum MatchOptions
         {
             Skin = 1 << 0,
-            Empty = 2 << 0,
+            Empty = 1 << 1,
         }
 
         private static class UsableItemCounter
