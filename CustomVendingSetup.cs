@@ -215,11 +215,6 @@ namespace Oxide.Plugins
             }
         }
 
-        private static bool HasCondition(ItemDefinition itemDefinition)
-        {
-            return itemDefinition.condition.enabled && itemDefinition.condition.max > 0;
-        }
-
         private object OnVendingTransaction(NPCVendingMachine vendingMachine, BasePlayer player, int sellOrderIndex, int numberOfTransactions, ItemContainer targetContainer)
         {
             var vendingProfile = _vendingMachineManager.GetController(vendingMachine)?.Profile;
@@ -718,6 +713,11 @@ namespace Oxide.Plugins
             return Math.Abs(a.y - b.y) < yTolerance
                 && Math.Abs(a.x - b.x) < xZTolerance
                 && Math.Abs(a.z - b.z) < xZTolerance;
+        }
+
+        private static bool HasCondition(ItemDefinition itemDefinition)
+        {
+            return itemDefinition.condition.enabled && itemDefinition.condition.max > 0;
         }
 
         private static void OpenVendingMachine(BasePlayer player, NPCVendingMachine vendingMachine)
