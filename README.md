@@ -1,6 +1,6 @@
 ## Video tutorial
 
-[![Video Tutorial](https://img.youtube.com/vi/oiKKByGV_i0/mqdefault.jpg)](https://www.youtube.com/watch?v=oiKKByGV_i0)
+[![Video Tutorial](https://img.youtube.com/vi/oiKKByGV_i0/maxresdefault.jpg)](https://www.youtube.com/watch?v=oiKKByGV_i0)
 
 ## Features
 
