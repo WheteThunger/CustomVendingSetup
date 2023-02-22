@@ -11,6 +11,7 @@
 - Compatible with NPC vending machines spawned at monuments by plugins such as [Monument Addons](https://umod.org/plugins/monument-addons)
 - Allows disabling vending machine map markers
 - Allows disabling delivery drone access
+- Supports Economics and Server Rewards
 - Supports blueprints, as well as items with custom skins and names
 - Supports attachments and other child items
 - Supports ammo type and amount
@@ -30,6 +31,12 @@ When you open an NPC vending machine at a monument, if you have permission, you 
 - Toggle whether delivery drones can access the vending machine by clicking on the drone icon (green = on, gray = off)
 - Change the shop name by clicking on the bottom-right note and editing its contents (supports multiple lines)
 - Save the changes by clicking the "SAVE" button
+
+### Drone marketplace limitations
+
+- Skin overlays are not visible while viewing vending machines from a drone marketplace 
+- Economics and Server Rewards currency cannot be used to purchase items from vending machines via drone marketplaces
+- When buying Economics or Server Rewards currency from a vending machine via a drone marketplace, the player will receive the currency immediately (the drone will travel but not transport any items)
 
 ## Permissions
 
@@ -52,12 +59,30 @@ Default configuration:
   "Shop UI settings": {
     "Enable skin overlays": false
   },
+  "Economics integration": {
+    "Enabled": false,
+    "Item short name": "paper",
+    "Item skin ID": 2420097877
+  },
+  "Server Rewards integration": {
+    "Enabled": false,
+    "Item short name": "paper",
+    "Item skin ID": 2420097877
+  },
   "Override item max stack sizes (shortname: amount)": {}
 }
 ```
 
 - `Shop UI settings`
   - `Enable skin overlays` (`true` or `false`) -- While `true`, skin images will be overlayed on top of items when needed. For example, to display currency skin.
+- `Economics integration` -- Controls integration with the Economics plugin.
+  - `Enabled` (`true` or `false`) -- Determines whether Economics integration is enabled. While enabled, the below configured item will be used as a proxy to configure vending machines to buy and sell Economics currency.
+  - `Item short name` -- Determines the item that will be associated with Economics currency. When you want to configure a sale offer to buy or sell Economics currency, you must place this item into the corresponding "For Sale" or "Currency" column while editing the vending machine. Whichever item you configure here will be displayed in the shop view, though you may cover it up with the image of a skin by setting a non-`0` `Item skin ID` and setting `Enable skin overlays` to `true`.
+  - `Item skin ID` -- Determines the skin ID that will be associated with Economics currency. If you set this to `0`, the vanilla item (with no skin) will be displayed in the shop view. If you set this to non-`0`, **and** you set `Enable skin overlays` to `true`, the skin will be displayed in the shop view.
+- `Server Rewards` -- Controls integration with the Server Rewards plugin.
+  - `Enabled` (`true` or `false`) -- Same as for Economics.
+  - `Item short name` -- Same as for Economics.
+  - `Item skin ID` -- Same as for Economics.
 - `Override item max stack sizes (shortname: amount)` -- This section allows you to override the max stack size of items that players can get when purchasing items, by item short name. This is intended to allow players to receive larger stacks of items from vending machines than they could receive from other sources. For example, if the max stack size of wood is `5000`, configuring a maximum of `10000` here will allow the player to acquire a single wood item with stack size `10000` (granted the vending machine has enough wood in stock).
   - This feature only applies to vending machines customized by this plugin.
   - This feature might not work with every stack size plugin. Worst case, editing these settings may have no effect.
@@ -92,13 +117,19 @@ Example of overriding stack sizes:
 
 ## FAQ
 
-#### Can I sell more than 7 items?
+#### How do I buy items faster (no transaction delay)?
 
-No. At most 7 items can be sold per vending machine. It's not possible to sell more due to UI limitations in the vanilla game. A pagination feature might be implemented in future versions of the plugin.
+Install the [Instant Buy](https://umod.org/plugins/instant-buy) plugin. It's compatible.
 
-#### How do I setup custom monuments?
+#### How do I make items restock instantly?
 
-As a prerequisite, the custom monument must use the monument marker prefab and have a unique name. Then, you must configure the monument's bounds in [Monument Finder](https://umod.org/plugins/monument-finder) to envelope the monument so that Custom Vending Setup can accurately determine whether a given vending machine is within that monument. Please see the Monument Finder plugin documentation for further guidance.
+Install the [Vending In Stock](https://umod.org/plugins/vending-in-stock) plugin. It's compatible.
+
+Alternatively, you can change restock speed per item, per vending machine by changing the "Seconds Between Refills" value in the corresponding item's note. Setting that value to `0` will cause that item to be restocked instantly when purchased.
+
+#### How do I allow players to purchase more items in bulk?
+
+The number of items you can purchase at once is determined by the vending machine's stock. By default, vending machines stock enough merchandise for 10 purchases, though more may be stocked in some cases (see below for that question). You can change the max stock per item, per vending machine by changing the "Max Stock" value in the corresponding item's note.
 
 #### Why do some items show more stock than configured?
 
@@ -125,9 +156,17 @@ Example solution B (stocks 5k wood total):
 
 This can happen for vending machines that sell an item for multiple amounts (e.g., scrap to **wood**, and stones to **wood**). This happens because vanilla stocking logic has inconsistencies which are fixed in the plugin's stocking logic.
 
+#### Can I sell more than 7 items?
+
+No. At most 7 items can be sold per vending machine. It's not possible to sell more due to UI limitations in the vanilla game. A pagination feature might be implemented in future versions of the plugin.
+
 #### How do I display custom item names?
 
-There is currently no way to display custom item names, but this feature is planned.
+There is currently no way to display custom item names, but this feature is planned. However, the plugin does store custom item names, and correctly sets those names on items that players purchase.
+
+#### How do I setup custom monuments?
+
+As a prerequisite, the custom monument must use the monument marker prefab and have a unique name. Then, you must configure the monument's bounds in [Monument Finder](https://umod.org/plugins/monument-finder) to envelope the monument so that Custom Vending Setup can accurately determine whether a given vending machine is within that monument. Please see the Monument Finder plugin documentation for further guidance.
 
 ## Developer API
 

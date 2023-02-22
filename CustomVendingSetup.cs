@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
+using Facepunch;
 using UnityEngine;
 using VLB;
 using static ProtoBuf.VendingMachine;
@@ -26,16 +27,17 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        private Plugin BagOfHolding, InstantBuy, ItemRetriever, MonumentFinder;
+        private readonly Plugin BagOfHolding, Economics, InstantBuy, ItemRetriever, MonumentFinder, ServerRewards;
 
         private SavedData _pluginData;
-        private Configuration _pluginConfig;
+        private Configuration _config;
 
         private const string PermissionUse = "customvendingsetup.use";
 
         private const string StoragePrefab = "assets/prefabs/deployable/large wood storage/box.wooden.large.prefab";
 
         private const int ItemsPerRow = 6;
+        private const int InventorySize = 24;
 
         // Going over 7 causes offers to get cut off regardless of resolution.
         private const int MaxVendingOffers = 7;
@@ -57,6 +59,8 @@ namespace Oxide.Plugins
         private VendingMachineManager _vendingMachineManager;
         private BagOfHoldingLimitManager _bagOfHoldingLimitManager;
         private DynamicHookSubscriber<BaseVendingController> _inaccessibleVendingMachines;
+        private DynamicHookSubscriber<BasePlayer> _playersNeedingFakeInventory;
+        private PaymentProviderResolver _paymentProviderResolver;
 
         private ItemDefinition _noteItemDefinition;
         private bool _isServerInitialized;
@@ -64,6 +68,8 @@ namespace Oxide.Plugins
         private VendingItem _itemBeingSold;
         private Dictionary<string, object> _itemRetrieverQuery = new Dictionary<string, object>();
         private List<Item> _reusableItemList = new List<Item>();
+        private object[] _objectArray1 = new object[1];
+        private object[] _objectArray2 = new object[2];
 
         public CustomVendingSetup()
         {
@@ -72,7 +78,9 @@ namespace Oxide.Plugins
             _componentFactory = new ComponentFactory<NPCVendingMachine, VendingMachineComponent>(this, _componentTracker);
             _vendingMachineManager = new VendingMachineManager(this, _componentFactory, _dataProviderRegistry);
             _bagOfHoldingLimitManager = new BagOfHoldingLimitManager(this);
+            _paymentProviderResolver = new PaymentProviderResolver(this);
             _inaccessibleVendingMachines = new DynamicHookSubscriber<BaseVendingController>(this, nameof(CanAccessVendingMachine));
+            _playersNeedingFakeInventory = new DynamicHookSubscriber<BasePlayer>(this, nameof(OnEntitySaved), nameof(OnInventoryNetworkUpdate));
         }
 
         #endregion
@@ -81,7 +89,7 @@ namespace Oxide.Plugins
 
         private void Init()
         {
-            _pluginConfig.Init();
+            _config.Init();
             _pluginData = SavedData.Load();
 
             permission.RegisterPermission(PermissionUse, this);
@@ -89,6 +97,7 @@ namespace Oxide.Plugins
             Unsubscribe(nameof(OnEntitySpawned));
 
             _inaccessibleVendingMachines.UnsubscribeAll();
+            _playersNeedingFakeInventory.UnsubscribeAll();
         }
 
         private void OnServerInitialized()
@@ -209,9 +218,23 @@ namespace Oxide.Plugins
                 component.ShowAdminUI(player);
             }
 
-            if (_pluginConfig.ShopUISettings.EnableSkinOverlays && controller.Profile?.Offers != null)
+            var profile = controller.Profile;
+            if (profile?.Offers == null)
+                return;
+
+            if (_config.ShopUISettings.EnableSkinOverlays)
             {
                 component.ShowShopUI(player);
+            }
+
+            if ((_config.Economics.EnabledAndValid && profile.HasPaymentProviderCurrency(_config.Economics))
+                || (_config.ServerRewards.EnabledAndValid && profile.HasPaymentProviderCurrency(_config.ServerRewards)))
+            {
+                // Make sure OnEntitySaved/OnInventoryNetworkUpdate are subscribed to modify network updates.
+                _playersNeedingFakeInventory.Add(player);
+
+                // Mark inventory dirty to send a network update, which will be modified by hooks.
+                player.inventory.containerMain.MarkDirty();
             }
         }
 
@@ -231,7 +254,7 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            numberOfTransactions = Mathf.Clamp(numberOfTransactions, 1, HasCondition(offer.SellItem.Definition) ? 1 : 1000000);
+            numberOfTransactions = Mathf.Clamp(numberOfTransactions, 1, HasCondition(offer.SellItem.ItemDefinition) ? 1 : 1000000);
 
             var sellAmount = offer.SellItem.Amount * numberOfTransactions;
             var sellItemQuery = ItemQuery.FromSellItem(offer.SellItem);
@@ -242,19 +265,19 @@ namespace Oxide.Plugins
             }
 
             var currencyAmount = offer.CurrencyItem.Amount * numberOfTransactions;
-            var currencyItemQuery = ItemQuery.FromCurrencyItem(offer.CurrencyItem);
-            if (SumPlayerItems(player, ref currencyItemQuery) < currencyAmount)
+            var currencyProvider = _paymentProviderResolver.Resolve(offer.CurrencyItem);
+            if (currencyProvider.GetBalance(player) < currencyAmount)
             {
                 // The player has insufficient currency.
                 return False;
             }
 
-            var marketTerminal = targetContainer?.entityOwner as MarketTerminal;
-            var onMarketplaceItemPurchase = marketTerminal?._onItemPurchasedCached;
-
             _reusableItemList.Clear();
-            TakePlayerItems(player, ref currencyItemQuery, currencyAmount, _reusableItemList);
+            currencyProvider.TakeBalance(player, currencyAmount, _reusableItemList);
 
+            var onMarketplaceItemPurchase = (targetContainer?.entityOwner as MarketTerminal)?._onItemPurchasedCached;
+
+            // Note: The list will be empty if Economics or Server Rewards currency were used.
             foreach (var currencyItem in _reusableItemList)
             {
                 MaybeGiveWeaponAmmo(currencyItem, player);
@@ -271,9 +294,6 @@ namespace Oxide.Plugins
 
             _reusableItemList.Clear();
 
-            var firstSellableItem = ItemUtils.FindFirstContainerItem(vendingMachine.inventory, ref sellItemQuery);
-            var maxStackSize = _pluginConfig.GetItemMaxStackSize(firstSellableItem);
-
             if (offer.RefillDelay == 0)
             {
                 // Don't change the stock amount. Instead, we will just leave the items in the vending machine.
@@ -288,27 +308,13 @@ namespace Oxide.Plugins
                 _itemBeingSold = offer.SellItem;
             }
 
-            var totalAmountToGive = sellAmount;
-
-            // Create new items and give them to the player.
-            // This approach was chosen instead of transferring the items because in many cases new items would have to
-            // be created anyway, since the vending machine maintains a single large stack of each item.
-            while (totalAmountToGive > 0)
+            _paymentProviderResolver.Resolve(offer.SellItem).AddBalance(player, sellAmount, new TransactionContext
             {
-                var amountToGive = Math.Min(totalAmountToGive, maxStackSize);
-                var itemToGive = offer.SellItem.Create(amountToGive);
-
-                totalAmountToGive -= amountToGive;
-
-                // The "CanPurchaseItem" hook may cause "CanVendingStockRefill" hook to be called.
-                var hookResult = ExposedHooks.CanPurchaseItem(player, itemToGive, onMarketplaceItemPurchase, vendingMachine, targetContainer);
-                if (hookResult is bool)
-                {
-                    LogWarning($"A plugin returned {hookResult} in the CanPurchaseItem hook, which ${Name} has ignored.");
-                }
-
-                GiveSoldItem(vendingMachine, itemToGive, player, marketTerminal, targetContainer);
-            }
+                VendingMachine = vendingMachine,
+                SellItem = offer.SellItem,
+                TargetContainer = targetContainer,
+                OnMarketplaceItemPurchase = onMarketplaceItemPurchase,
+            });
 
             // These can now be unset since the "CanVendingStockRefill" hook can no longer be called after this point.
             _performingInstantRestock = false;
@@ -401,6 +407,19 @@ namespace Oxide.Plugins
                 return False;
 
             return null;
+        }
+
+        private void OnEntitySaved(BasePlayer player, BaseNetworkable.SaveInfo saveInfo)
+        {
+            AddCurrencyToContainerSnapshot(player, saveInfo.msg.basePlayer.inventory.invMain);
+        }
+
+        private void OnInventoryNetworkUpdate(PlayerInventory inventory, ItemContainer container, ProtoBuf.UpdateItemContainer updatedItemContainer, PlayerInventory.Type inventoryType)
+        {
+            if (inventoryType != PlayerInventory.Type.Main)
+                return;
+
+            AddCurrencyToContainerSnapshot(inventory.baseEntity, updatedItemContainer.container[0]);
         }
 
         #endregion
@@ -927,8 +946,11 @@ namespace Oxide.Plugins
             }
         }
 
-        private static void GiveSoldItem(NPCVendingMachine vendingMachine, Item item, BasePlayer player, MarketTerminal marketTerminal, ItemContainer targetContainer)
+        private static void GiveSoldItem(Item item, BasePlayer player, ref TransactionContext transaction)
         {
+            var vendingMachine = transaction.VendingMachine;
+            var targetContainer = transaction.TargetContainer;
+
             // Unset the placeholder flag to allow Enchanted Items to transform the artifact.
             item.SetFlag(Item.Flag.Placeholder, false);
 
@@ -941,7 +963,91 @@ namespace Oxide.Plugins
                 item.Drop(targetContainer.dropPosition, targetContainer.dropVelocity);
             }
 
-            marketTerminal?._onItemPurchasedCached?.Invoke(player, item);
+            transaction.OnMarketplaceItemPurchase?.Invoke(player, item);
+        }
+
+        private static int GetHighestUsedSlot(ProtoBuf.ItemContainer containerData)
+        {
+            var highestUsedSlot = -1;
+
+            for (var i = 0; i < containerData.contents.Count; i++)
+            {
+                var item = containerData.contents[i];
+                if (item.slot > highestUsedSlot)
+                {
+                    highestUsedSlot = item.slot;
+                }
+            }
+
+            return highestUsedSlot;
+        }
+
+        private static void AddItemForNetwork(ProtoBuf.ItemContainer containerData, int slot, int itemId, int amount, uint uid)
+        {
+            var itemData = Pool.Get<ProtoBuf.Item>();
+            itemData.slot = slot;
+            itemData.itemid = itemId;
+            itemData.amount = amount;
+            itemData.UID = uid;
+            containerData.contents.Add(itemData);
+        }
+
+        private object CallPlugin<T1>(Plugin plugin, string methodName, T1 arg1)
+        {
+            _objectArray1[0] = ObjectCache.Get(arg1);
+            return plugin.Call(methodName, _objectArray1);
+        }
+
+        private object CallPlugin<T1, T2>(Plugin plugin, string methodName, T1 arg1, T2 arg2)
+        {
+            _objectArray2[0] = ObjectCache.Get(arg1);
+            _objectArray2[1] = ObjectCache.Get(arg2);
+            return plugin.Call(methodName, _objectArray2);
+        }
+
+        private void AddCurrencyToContainerSnapshot(BasePlayer player, ProtoBuf.ItemContainer containerData)
+        {
+            if (containerData == null
+                || containerData.slots < InventorySize
+                || !_playersNeedingFakeInventory.Contains(player))
+                return;
+
+            var lootingContainer = player.inventory.loot.containers.FirstOrDefault();
+            var vendingMachine = lootingContainer?.entityOwner as NPCVendingMachine;
+            if ((object)vendingMachine == null)
+                return;
+
+            var profile = _componentTracker.GetComponent(vendingMachine)?.Profile;
+            if (profile == null)
+                return;
+
+            var nextInvisibleSlot = Math.Max(containerData.slots, GetHighestUsedSlot(containerData) + 1);
+
+            if (_config.Economics.EnabledAndValid && profile.HasPaymentProviderCurrency(_config.Economics))
+            {
+                AddItemForNetwork(
+                    containerData,
+                    slot: nextInvisibleSlot,
+                    itemId: _config.Economics.ItemDefinition.itemid,
+                    amount: _paymentProviderResolver.EconomicsPaymentProvider.GetBalance(player),
+                    uid: uint.MaxValue - (uint)nextInvisibleSlot
+                );
+                nextInvisibleSlot++;
+            }
+
+            if (_config.ServerRewards.EnabledAndValid && profile.HasPaymentProviderCurrency(_config.ServerRewards))
+            {
+                AddItemForNetwork(
+                    containerData,
+                    slot: nextInvisibleSlot,
+                    itemId: _config.ServerRewards.ItemDefinition.itemid,
+                    amount: _paymentProviderResolver.ServerRewardsPaymentProvider.GetBalance(player),
+                    uid: uint.MaxValue - (uint)nextInvisibleSlot
+                );
+                nextInvisibleSlot++;
+            }
+
+            containerData.slots = nextInvisibleSlot;
         }
 
         private Dictionary<string, object> SetupItemRetrieverQuery(ref ItemQuery itemQuery)
@@ -1682,6 +1788,175 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region Payment Providers
+
+        private struct TransactionContext
+        {
+            public NPCVendingMachine VendingMachine;
+            public VendingItem SellItem;
+            public ItemContainer TargetContainer;
+            public Action<BasePlayer, Item> OnMarketplaceItemPurchase;
+        }
+
+        private interface IPaymentProvider
+        {
+            int GetBalance(BasePlayer player);
+            bool AddBalance(BasePlayer player, int amount, TransactionContext transaction);
+            bool TakeBalance(BasePlayer player, int amount, List<Item> collect);
+        }
+
+        private class ItemsPaymentProvider : IPaymentProvider
+        {
+            public VendingItem VendingItem;
+
+            private CustomVendingSetup _plugin;
+
+            public ItemsPaymentProvider(CustomVendingSetup plugin)
+            {
+                _plugin = plugin;
+            }
+
+            public int GetBalance(BasePlayer player)
+            {
+                var itemQuery = ItemQuery.FromCurrencyItem(VendingItem);
+                return _plugin.SumPlayerItems(player, ref itemQuery);
+            }
+
+            public bool AddBalance(BasePlayer player, int amount, TransactionContext transaction)
+            {
+                var vendingMachine = transaction.VendingMachine;
+                var sellItem = transaction.SellItem;
+
+                var sellItemQuery = ItemQuery.FromSellItem(sellItem);
+                var firstSellableItem = ItemUtils.FindFirstContainerItem(vendingMachine.inventory, ref sellItemQuery);
+                var maxStackSize = _plugin._config.GetItemMaxStackSize(firstSellableItem);
+
+                // Create new items and give them to the player.
+                // This approach was chosen instead of transferring the items because in many cases new items would have to
+                // be created anyway, since the vending machine maintains a single large stack of each item.
+                while (amount > 0)
+                {
+                    var amountToGive = Math.Min(amount, maxStackSize);
+                    var itemToGive = sellItem.Create(amountToGive);
+
+                    amount -= amountToGive;
+
+                    // The "CanPurchaseItem" hook may cause "CanVendingStockRefill" hook to be called.
+                    var hookResult = ExposedHooks.CanPurchaseItem(player, itemToGive, transaction.OnMarketplaceItemPurchase, vendingMachine, transaction.TargetContainer);
+                    if (hookResult is bool)
+                    {
+                        LogWarning($"A plugin returned {hookResult} in the CanPurchaseItem hook, which has been ignored.");
+                    }
+
+                    GiveSoldItem(itemToGive, player, ref transaction);
+                }
+
+                return true;
+            }
+
+            public bool TakeBalance(BasePlayer player, int amount, List<Item> collect)
+            {
+                if (amount <= 0)
+                    return true;
+
+                var itemQuery = ItemQuery.FromCurrencyItem(VendingItem);
+                _plugin.TakePlayerItems(player, ref itemQuery, amount, collect);
+                return true;
+            }
+        }
+
+        private class EconomicsPaymentProvider : IPaymentProvider
+        {
+            private CustomVendingSetup _plugin;
+            private Plugin _ownerPlugin => _plugin.Economics;
+
+            public EconomicsPaymentProvider(CustomVendingSetup plugin)
+            {
+                _plugin = plugin;
+            }
+
+            public bool IsAvailable => _ownerPlugin != null;
+
+            public int GetBalance(BasePlayer player)
+            {
+                return Convert.ToInt32(_plugin.CallPlugin(_ownerPlugin, "Balance", player.userID));
+            }
+
+            public bool AddBalance(BasePlayer player, int amount, TransactionContext transaction)
+            {
+                var result = _plugin.CallPlugin(_ownerPlugin, "Deposit", player.userID, Convert.ToDouble(amount));
+                return result is bool && (bool)result;
+            }
+
+            public bool TakeBalance(BasePlayer player, int amount, List<Item> collect)
+            {
+                var result = _plugin.CallPlugin(_ownerPlugin, "Withdraw", player.userID, Convert.ToDouble(amount));
+                return result is bool && (bool)result;
+            }
+        }
+
+        private class ServerRewardsPaymentProvider : IPaymentProvider
+        {
+            private CustomVendingSetup _plugin;
+            private Plugin _ownerPlugin => _plugin.ServerRewards;
+
+            public ServerRewardsPaymentProvider(CustomVendingSetup plugin)
+            {
+                _plugin = plugin;
+            }
+
+            public bool IsAvailable => _ownerPlugin != null;
+
+            public int GetBalance(BasePlayer player)
+            {
+                return Convert.ToInt32(_plugin.CallPlugin(_ownerPlugin, "CheckPoints", player.userID));
+            }
+
+            public bool AddBalance(BasePlayer player, int amount, TransactionContext transaction)
+            {
+                var result = _plugin.CallPlugin(_ownerPlugin, "AddPoints", player.userID, amount);
+                return result is bool && (bool)result;
+            }
+
+            public bool TakeBalance(BasePlayer player, int amount, List<Item> collect)
+            {
+                var result = _plugin.CallPlugin(_ownerPlugin, "TakePoints", player.userID, amount);
+                return result is bool && (bool)result;
+            }
+        }
+
+        private class PaymentProviderResolver
+        {
+            public readonly EconomicsPaymentProvider EconomicsPaymentProvider;
+            public readonly ServerRewardsPaymentProvider ServerRewardsPaymentProvider;
+
+            private readonly CustomVendingSetup _plugin;
+            private readonly ItemsPaymentProvider _itemsPaymentProvider;
+            private Configuration _config => _plugin._config;
+
+            public PaymentProviderResolver(CustomVendingSetup plugin)
+            {
+                _plugin = plugin;
+                _itemsPaymentProvider = new ItemsPaymentProvider(plugin);
+                EconomicsPaymentProvider = new EconomicsPaymentProvider(plugin);
+                ServerRewardsPaymentProvider = new ServerRewardsPaymentProvider(plugin);
+            }
+
+            public IPaymentProvider Resolve(VendingItem vendingItem)
+            {
+                if (_config.Economics.MatchesItem(vendingItem) && EconomicsPaymentProvider.IsAvailable)
+                    return EconomicsPaymentProvider;
+
+                if (_config.ServerRewards.MatchesItem(vendingItem) && ServerRewardsPaymentProvider.IsAvailable)
+                    return ServerRewardsPaymentProvider;
+
+                _itemsPaymentProvider.VendingItem = vendingItem;
+                return _itemsPaymentProvider;
+            }
+        }
+
+        #endregion
+
         #region Item Query
 
         private struct ItemQuery
@@ -1780,17 +2055,6 @@ namespace Oxide.Plugins
                 }
 
                 return sum;
-            }
-
-            public static void FindContainerItems(ItemContainer container, ref ItemQuery itemQuery, List<Item> collect)
-            {
-                foreach (var item in container.itemList)
-                {
-                    if (itemQuery.GetUsableAmount(item) <= 0)
-                        continue;
-
-                    collect.Add(item);
-                }
             }
 
             public static int SumPlayerItems(BasePlayer player, ref ItemQuery itemQuery)
@@ -1976,7 +2240,7 @@ namespace Oxide.Plugins
             private VendingProfile _vendingProfile;
             private JObject _serializedData;
 
-            public VendingProfile GetData()
+            public VendingProfile GetData(Configuration config)
             {
                 if (_vendingProfile == null)
                 {
@@ -2050,6 +2314,19 @@ namespace Oxide.Plugins
                 _dataProviderRegistry = dataProviderRegistry;
             }
 
+            public bool HasAnyPaymentProviderCurrency()
+            {
+                foreach (var controller in _uniqueControllers)
+                {
+                    var profile = controller.Profile;
+                    if (profile.HasPaymentProviderCurrency(_plugin._config.Economics)
+                        || profile.HasPaymentProviderCurrency(_plugin._config.ServerRewards))
+                        return true;
+                }
+
+                return false;
+            }
+
             public void HandleVendingMachineSpawned(NPCVendingMachine vendingMachine)
             {
                 if (GetController(vendingMachine) != null)
@@ -2058,7 +2335,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                BaseVendingController controller = null;
+                BaseVendingController controller;
 
                 var dataProviderSpec = ExposedHooks.OnCustomVendingSetupDataProvider(vendingMachine);
                 if (dataProviderSpec != null)
@@ -2369,7 +2646,7 @@ namespace Oxide.Plugins
 
             protected abstract void SaveProfile(VendingProfile vendingProfile);
 
-            protected abstract void DeleteProfile(VendingProfile vendignProfile);
+            protected abstract void DeleteProfile(VendingProfile vendingProfile);
 
             public void StartEditing(BasePlayer player, NPCVendingMachine vendingMachine)
             {
@@ -2496,7 +2773,7 @@ namespace Oxide.Plugins
                 : base(plugin, componentFactory)
             {
                 DataProvider = dataProvider;
-                Profile = dataProvider.GetData();
+                Profile = dataProvider.GetData(plugin._config);
                 UpdateDroneAccessibility();
             }
 
@@ -2506,7 +2783,7 @@ namespace Oxide.Plugins
                 DataProvider.SaveData(vendingProfile);
             }
 
-            protected override void DeleteProfile(VendingProfile vendignProfile)
+            protected override void DeleteProfile(VendingProfile vendingProfile)
             {
                 DataProvider.SaveData(null);
             }
@@ -2536,9 +2813,9 @@ namespace Oxide.Plugins
                 _pluginData.Save();
             }
 
-            protected override void DeleteProfile(VendingProfile vendignProfile)
+            protected override void DeleteProfile(VendingProfile vendingProfile)
             {
-                _pluginData.VendingProfiles.Remove(vendignProfile);
+                _pluginData.VendingProfiles.Remove(vendingProfile);
                 _pluginData.Save();
             }
 
@@ -2687,6 +2964,12 @@ namespace Oxide.Plugins
                 {
                     DestroyShopUI(player);
                 }
+
+                // Make sure OnEntitySaved/OnInventoryNetworkUpdate are unsubscribed (when all players are removed).
+                Plugin._playersNeedingFakeInventory.Remove(player);
+
+                // Mark inventory dirty to send a network update, which will no longer be modified by hooks.
+                player.inventory.containerMain.MarkDirty();
             }
 
             protected override void OnDestroy()
@@ -3087,7 +3370,7 @@ namespace Oxide.Plugins
             public List<VendingItem> Contents;
 
             private ItemDefinition _itemDefinition;
-            public ItemDefinition Definition
+            public ItemDefinition ItemDefinition
             {
                 get
                 {
@@ -3114,8 +3397,8 @@ namespace Oxide.Plugins
                 }
             }
 
-            public bool IsValid => (object)Definition != null;
-            public int ItemId => Definition.itemid;
+            public bool IsValid => (object)ItemDefinition != null;
+            public int ItemId => ItemDefinition.itemid;
 
             public Item Create(int amount)
             {
@@ -3123,11 +3406,11 @@ namespace Oxide.Plugins
                 if (IsBlueprint)
                 {
                     item = ItemManager.CreateByItemID(BlueprintItemId, amount, SkinId);
-                    item.blueprintTarget = Definition.itemid;
+                    item.blueprintTarget = ItemDefinition.itemid;
                 }
                 else
                 {
-                    item = ItemManager.Create(Definition, amount, SkinId);
+                    item = ItemManager.Create(ItemDefinition, amount, SkinId);
                 }
 
                 if (item == null)
@@ -3206,17 +3489,6 @@ namespace Oxide.Plugins
             }
 
             public Item Create() => Create(Amount);
-
-            public Item Split(Item item, int amount)
-            {
-                if (amount <= 0 || amount >= item.amount)
-                    return null;
-
-                item.amount -= amount;
-                item.MarkDirty();
-
-                return Create(amount);
-            }
         }
 
         [JsonObject(MemberSerialization.OptIn)]
@@ -3400,6 +3672,17 @@ namespace Oxide.Plugins
                 return null;
             }
 
+            public bool HasPaymentProviderCurrency(PaymentProviderConfig paymentProviderConfig)
+            {
+                foreach (var offer in Offers)
+                {
+                    if (paymentProviderConfig.MatchesItem(offer.CurrencyItem))
+                        return true;
+                }
+
+                return false;
+            }
+
             // IMonumentRelativePosition members.
             public string GetMonumentPrefabName() => Monument;
             public string GetMonumentAlias() => MonumentAlias;
@@ -3498,28 +3781,72 @@ namespace Oxide.Plugins
 
         #region Configuration
 
+        [JsonObject(MemberSerialization.OptIn)]
         private class ShopUISettings
         {
             [JsonProperty("Enable skin overlays")]
             public bool EnableSkinOverlays = false;
         }
 
+        [JsonObject(MemberSerialization.OptIn)]
+        private class PaymentProviderConfig
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled;
+
+            [JsonProperty("Item short name")]
+            public string ItemShortName;
+
+            [JsonProperty("Item skin ID")]
+            public ulong ItemSkinId;
+
+            public ItemDefinition ItemDefinition { get; private set; }
+
+            public bool EnabledAndValid => Enabled && (object)ItemDefinition != null;
+
+            public void Init()
+            {
+                if (string.IsNullOrWhiteSpace(ItemShortName))
+                    return;
+
+                ItemDefinition = ItemManager.FindItemDefinition(ItemShortName);
+                if (ItemDefinition == null)
+                {
+                    LogError($"Invalid item short name in config: {ItemShortName}");
+                }
+            }
+
+            public bool MatchesItem(VendingItem vendingItem)
+            {
+                return Enabled && vendingItem.ItemDefinition == ItemDefinition && vendingItem.SkinId == ItemSkinId;
+            }
+        }
+
+        [JsonObject(MemberSerialization.OptIn)]
         private class Configuration : SerializableConfiguration
         {
             [JsonProperty("Shop UI settings")]
             public ShopUISettings ShopUISettings = new ShopUISettings();
+
+            [JsonProperty("Economics integration")]
+            public PaymentProviderConfig Economics = new PaymentProviderConfig();
+
+            [JsonProperty("Server Rewards integration")]
+            public PaymentProviderConfig ServerRewards = new PaymentProviderConfig();
 
             [JsonProperty("Override item max stack sizes (shortname: amount)")]
             public Dictionary<string, int> ItemStackSizeOverrides = new Dictionary<string, int>();
 
             public void Init()
             {
+                Economics.Init();
+                ServerRewards.Init();
+
                 foreach (var entry in ItemStackSizeOverrides)
                 {
                     if (ItemManager.FindItemDefinition(entry.Key) == null)
                     {
-                        LogError($"Invalid item in config: {entry.Key}");
-                        continue;
+                        LogError($"Invalid item short name in config: {entry.Key}");
                     }
                 }
             }
@@ -3611,20 +3938,20 @@ namespace Oxide.Plugins
             return changed;
         }
 
-        protected override void LoadDefaultConfig() => _pluginConfig = GetDefaultConfig();
+        protected override void LoadDefaultConfig() => _config = GetDefaultConfig();
 
         protected override void LoadConfig()
         {
             base.LoadConfig();
             try
             {
-                _pluginConfig = Config.ReadObject<Configuration>();
-                if (_pluginConfig == null)
+                _config = Config.ReadObject<Configuration>();
+                if (_config == null)
                 {
                     throw new JsonException();
                 }
 
-                if (MaybeUpdateConfig(_pluginConfig))
+                if (MaybeUpdateConfig(_config))
                 {
                     LogWarning("Configuration appears to be outdated; updating and saving");
                     SaveConfig();
@@ -3641,7 +3968,7 @@ namespace Oxide.Plugins
         protected override void SaveConfig()
         {
             Log($"Configuration changes saved to {Name}.json");
-            Config.WriteObject(_pluginConfig, true);
+            Config.WriteObject(_config, true);
         }
 
         #endregion
