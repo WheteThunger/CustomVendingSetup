@@ -27,7 +27,7 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        private readonly Plugin BagOfHolding, Economics, InstantBuy, ItemRetriever, MonumentFinder, ServerRewards;
+        private readonly Plugin BagOfHolding, Economics, ItemRetriever, MonumentFinder, ServerRewards;
 
         private SavedData _pluginData;
         private Configuration _config;
@@ -247,6 +247,10 @@ namespace Oxide.Plugins
                 return null;
             }
 
+            var component = _componentTracker.GetComponent(vendingMachine);
+            if (component == null)
+                return null;
+
             var offer = vendingProfile.GetOfferForSellOrderIndex(sellOrderIndex);
             if (offer == null)
             {
@@ -327,14 +331,10 @@ namespace Oxide.Plugins
 
             vendingMachine.UpdateEmptyFlag();
 
-            if (InstantBuy == null)
+            // Reopen the UI if it was closed due to a transaction delay.
+            if (!component.HasUI(player) && IsLootingVendingMachine(player, vendingMachine))
             {
-                var lootContainer = player.inventory.loot.containers.FirstOrDefault();
-                if (lootContainer != null && lootContainer.entityOwner == vendingMachine)
-                {
-                    // Redraw the UI, since it would have been hidden in the "OnBuyVendingItem" hook.
-                    OnVendingShopOpened(vendingMachine, player);
-                }
+                OnVendingShopOpened(vendingMachine, player);
             }
 
             if (offer.CustomSettings?.Count > 0)
@@ -350,10 +350,11 @@ namespace Oxide.Plugins
             if (!IsCustomized(vendingMachine))
                 return;
 
-            if (InstantBuy == null)
-            {
-                _componentTracker.GetComponent(vendingMachine)?.RemoveUI(player);
-            }
+            var component = _componentTracker.GetComponent(vendingMachine);
+            if (component == null)
+                return;
+
+            ScheduleRemoveUI(vendingMachine, player, component);
         }
 
         // This hook is exposed by plugin: Vending In Stock (VendingInStock).
@@ -731,6 +732,11 @@ namespace Oxide.Plugins
         public static void LogError(string message) => Interface.Oxide.LogError($"[Custom Vending Setup] {message}");
         public static void LogWarning(string message) => Interface.Oxide.LogWarning($"[Custom Vending Setup] {message}");
 
+        private static bool IsLootingVendingMachine(BasePlayer player, NPCVendingMachine vendingMachine)
+        {
+            return player.inventory.loot.containers.FirstOrDefault()?.entityOwner == vendingMachine;
+        }
+
         private static bool AreVectorsClose(Vector3 a, Vector3 b, float xZTolerance = 0.001f, float yTolerance = 10)
         {
             // Allow a generous amount of vertical distance given that plugins may snap entities to terrain.
@@ -1008,6 +1014,22 @@ namespace Oxide.Plugins
             _objectArray2[0] = ObjectCache.Get(arg1);
             _objectArray2[1] = ObjectCache.Get(arg2);
             return plugin.Call(methodName, _objectArray2);
+        }
+
+        private void ScheduleRemoveUI(NPCVendingMachine vendingMachine, BasePlayer player, VendingMachineComponent component)
+        {
+            component.Invoke(() =>
+            {
+                if (vendingMachine == null || vendingMachine.IsDestroyed)
+                    return;
+
+                if (IsLootingVendingMachine(player, vendingMachine) &&
+                    !vendingMachine.IsInvoking(vendingMachine.CompletePendingOrder))
+                    return;
+
+                // Remove the UI because the player stopped viewing the vending machine or the transaction is pending.
+                component.RemoveUI(player);
+            }, 0);
         }
 
         private void AddCurrencyToContainerSnapshot(BasePlayer player, ProtoBuf.ItemContainer containerData)
@@ -2927,6 +2949,11 @@ namespace Oxide.Plugins
             public override void OnCreated()
             {
                 _vendingMachine = Host;
+            }
+
+            public bool HasUI(BasePlayer player)
+            {
+                return _adminUIViewers.Contains(player) || _shopUIViewers.Contains(player);
             }
 
             public void ShowAdminUI(BasePlayer player)
