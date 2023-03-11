@@ -1237,28 +1237,26 @@ namespace Oxide.Plugins
 
                 var headerOffset = -6;
 
-                cuiElements.Add(
-                    new CuiElement
+                cuiElements.Add(new CuiElement
+                {
+                    Parent = UIName,
+                    Name = TipUIName,
+                    Components =
                     {
-                        Components =
+                        new CuiRawImageComponent
                         {
-                            new CuiRawImageComponent
-                            {
-                                Color = UIConstants.CancelButtonColor,
-                                Sprite = UIConstants.TexturedBackgroundSprite,
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = UIConstants.AnchorMin,
-                                AnchorMax = UIConstants.AnchorMax,
-                                OffsetMin = $"0 {headerOffset - UIConstants.HeaderHeight}",
-                                OffsetMax = $"{UIConstants.PanelWidth} {headerOffset}",
-                            }
+                            Color = UIConstants.CancelButtonColor,
+                            Sprite = UIConstants.TexturedBackgroundSprite,
                         },
-                        Parent = UIName,
-                        Name = TipUIName,
-                    }
-                );
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = UIConstants.AnchorMin,
+                            AnchorMax = UIConstants.AnchorMax,
+                            OffsetMin = $"0 {headerOffset - UIConstants.HeaderHeight}",
+                            OffsetMax = $"{UIConstants.PanelWidth} {headerOffset}",
+                        }
+                    },
+                });
 
                 var forSaleText = plugin.GetMessage(player, Lang.InfoForSale);
                 var costText = plugin.GetMessage(player, Lang.InfoCost);
@@ -1276,8 +1274,8 @@ namespace Oxide.Plugins
 
             private static void AddHeaderLabel(CuiElementContainer cuiElements, int index, string text)
             {
-                float xMin = 6 + index * (UIConstants.ItemBoxSize + UIConstants.ItemSpacing);
-                float xMax = xMin + UIConstants.ItemBoxSize;
+                var xMin = 6 + index * (UIConstants.ItemBoxSize + UIConstants.ItemSpacing);
+                var xMax = xMin + UIConstants.ItemBoxSize;
 
                 cuiElements.Add(
                     new CuiLabel
@@ -1308,51 +1306,48 @@ namespace Oxide.Plugins
                 var xMax = UIConstants.PanelWidth - 2 * (UIConstants.ButtonWidth + UIConstants.ButtonHorizontalSpacing);
                 var xMin = xMax - iconSize;
 
-                cuiElements.Add(
-                    new CuiElement
+                cuiElements.Add(new CuiElement
+                {
+                    Parent = UIName,
+                    Name = BroadcastUIName,
+                    DestroyUi = BroadcastUIName,
+                    Components =
                     {
-                        Parent = UIName,
-                        Name = BroadcastUIName,
-                        Components =
+                        new CuiButtonComponent
                         {
-                            new CuiButtonComponent
-                            {
-                                Color = "0 0 0 0",
-                                Command = $"customvendingsetup.ui {vendingMachine.net.ID} {UICommands.ToggleBroadcast}",
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = "0 0",
-                                AnchorMax = "0 0",
-                                OffsetMin = $"{xMin} 0",
-                                OffsetMax = $"{xMax} {UIConstants.ButtonHeight}",
-                            },
+                            Color = "0 0 0 0",
+                            Command = $"customvendingsetup.ui {vendingMachine.net.ID} {UICommands.ToggleBroadcast}",
                         },
-                    }
-                );
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = "0 0",
+                            AnchorMax = "0 0",
+                            OffsetMin = $"{xMin} 0",
+                            OffsetMax = $"{xMax} {UIConstants.ButtonHeight}",
+                        },
+                    },
+                });
 
-                cuiElements.Add(
-                    new CuiElement
+                cuiElements.Add(new CuiElement
+                {
+                    Parent = BroadcastUIName,
+                    Components =
                     {
-                        Parent = BroadcastUIName,
-                        Components =
+                        new CuiRawImageComponent
                         {
-                            new CuiRawImageComponent
-                            {
-                                Color = uiState.Broadcast ? UIConstants.SaveButtonTextColor : UIConstants.CancelButtonTextColor,
-                                Sprite = UIConstants.BroadcastIcon,
-                                Material = UIConstants.IconMaterial,
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = "0 0",
-                                AnchorMax = "0 0",
-                                OffsetMin = "0 0",
-                                OffsetMax = $"{iconSize} {iconSize}",
-                            },
+                            Color = uiState.Broadcast ? UIConstants.SaveButtonTextColor : UIConstants.CancelButtonTextColor,
+                            Sprite = UIConstants.BroadcastIcon,
+                            Material = UIConstants.IconMaterial,
                         },
-                    }
-                );
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = "0 0",
+                            AnchorMax = "0 0",
+                            OffsetMin = "0 0",
+                            OffsetMax = $"{iconSize} {iconSize}",
+                        },
+                    },
+                });
             }
 
             private static void AddDroneButton(CuiElementContainer cuiElements, NPCVendingMachine vendingMachine, EditFormState uiState)
@@ -1364,54 +1359,50 @@ namespace Oxide.Plugins
 
                 var droneAccessible = uiState.Broadcast && uiState.DroneAccessible;
 
-                cuiElements.Add(
-                    new CuiElement
+                cuiElements.Add(new CuiElement
+                {
+                    Parent = BroadcastUIName,
+                    Name = DroneUIName,
+                    Components =
                     {
-                        Parent = BroadcastUIName,
-                        Name = DroneUIName,
-                        Components =
+                        new CuiButtonComponent
                         {
-                            new CuiButtonComponent
-                            {
-                                Color = "0 0 0 0",
-                                Command = $"customvendingsetup.ui {vendingMachine.net.ID} {UICommands.ToggleDroneAccessible}",
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = "0 0",
-                                AnchorMax = "0 0",
-                                OffsetMin = $"{xMin} 0",
-                                OffsetMax = $"{xMax} {UIConstants.ButtonHeight}",
-                            },
+                            Color = "0 0 0 0",
+                            Command = $"customvendingsetup.ui {vendingMachine.net.ID} {UICommands.ToggleDroneAccessible}",
                         },
-                    }
-                );
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = "0 0",
+                            AnchorMax = "0 0",
+                            OffsetMin = $"{xMin} 0",
+                            OffsetMax = $"{xMax} {UIConstants.ButtonHeight}",
+                        },
+                    },
+                });
 
-                cuiElements.Add(
-                    new CuiElement
+                cuiElements.Add(new CuiElement
+                {
+                    Parent = DroneUIName,
+                    Components =
                     {
-                        Parent = DroneUIName,
-                        Components =
+                        new CuiImageComponent
                         {
-                            new CuiImageComponent
-                            {
-                                Color = droneAccessible ? UIConstants.SaveButtonTextColor : UIConstants.CancelButtonTextColor,
-                                Sprite = UIConstants.DroneIcon,
-                                Material = UIConstants.GreyOutMaterial,
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = "0 0",
-                                AnchorMax = "0 0",
-                                OffsetMin = "0 0",
-                                OffsetMax = $"{iconSize} {iconSize}",
-                            },
+                            Color = droneAccessible ? UIConstants.SaveButtonTextColor : UIConstants.CancelButtonTextColor,
+                            Sprite = UIConstants.DroneIcon,
+                            Material = UIConstants.GreyOutMaterial,
                         },
-                    }
-                );
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = "0 0",
+                            AnchorMax = "0 0",
+                            OffsetMin = "0 0",
+                            OffsetMax = $"{iconSize} {iconSize}",
+                        },
+                    },
+                });
             }
 
-            public static string RenderBroadcastUI(BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
+            public static string RenderBroadcastUI(NPCVendingMachine vendingMachine, EditFormState uiState)
             {
                 var cuiElements = new CuiElementContainer();
                 AddBroadcastButton(cuiElements, vendingMachine, uiState);
@@ -1464,20 +1455,22 @@ namespace Oxide.Plugins
 
                 var cuiElements = new CuiElementContainer
                 {
+                    new CuiElement
                     {
-                        new CuiPanel
+                        Parent = "Overlay",
+                        Name = UIName,
+                        DestroyUi = UIName,
+                        Components =
                         {
-                            RectTransform =
+                            new CuiRectTransformComponent
                             {
                                 AnchorMin = UIConstants.AnchorMin,
                                 AnchorMax = UIConstants.AnchorMax,
                                 OffsetMin = $"{offsetX} {offsetY}",
                                 OffsetMax = $"{offsetX} {offsetY}",
-                            },
-                        },
-                        "Overlay",
-                        UIName
-                    }
+                            }
+                        }
+                    },
                 };
 
                 var buttonIndex = 0;
@@ -1551,18 +1544,20 @@ namespace Oxide.Plugins
             {
                 var cuiElements = new CuiElementContainer
                 {
+                    new CuiElement
                     {
-                        new CuiPanel
+                        Parent = "Hud.Menu",
+                        Name = UIName,
+                        DestroyUi = UIName,
+                        Components =
                         {
-                            RectTransform =
+                            new CuiRectTransformComponent
                             {
                                 AnchorMin = UIConstants.AnchorMin,
                                 AnchorMax = UIConstants.AnchorMax,
-                            },
-                        },
-                        "Hud.Menu",
-                        UIName
-                    }
+                            }
+                        }
+                    },
                 };
 
                 var skinsByItemShortName = new Dictionary<string, HashSet<ulong>>();
@@ -1619,28 +1614,26 @@ namespace Oxide.Plugins
                 var vendingItem = isCurrency ? offer.CurrencyItem : offer.SellItem;
 
                 // Background
-                cuiElements.Add(
-                    new CuiElement
+                cuiElements.Add(new CuiElement
+                {
+                    Parent = UIName,
+                    Components =
                     {
-                        Components =
+                        new CuiRawImageComponent
                         {
-                            new CuiRawImageComponent
-                            {
-                                Color = "0.35 0.35 0.35 1",
-                                Sprite = UIConstants.TexturedBackgroundSprite,
-                                FadeIn = 0.1f,
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = UIConstants.AnchorMin,
-                                AnchorMax = UIConstants.AnchorMax,
-                                OffsetMin = $"{offsetX} {offsetY}",
-                                OffsetMax = $"{offsetX + OverlaySize} {offsetY + OverlaySize}",
-                            }
+                            Color = "0.35 0.35 0.35 1",
+                            Sprite = UIConstants.TexturedBackgroundSprite,
+                            FadeIn = 0.1f,
                         },
-                        Parent = UIName,
-                    }
-                );
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = UIConstants.AnchorMin,
+                            AnchorMax = UIConstants.AnchorMax,
+                            OffsetMin = $"{offsetX} {offsetY}",
+                            OffsetMax = $"{offsetX + OverlaySize} {offsetY + OverlaySize}",
+                        }
+                    },
+                });
 
                 // Skin icon
                 cuiElements.Add(new CuiElement
@@ -1669,30 +1662,28 @@ namespace Oxide.Plugins
                 if (vendingItem.Amount > 1)
                 {
                     // Amount
-                    cuiElements.Add(
-                        new CuiElement
+                    cuiElements.Add(new CuiElement
+                    {
+                        Parent = UIName,
+                        Components =
                         {
-                            Parent = UIName,
-                            Components =
+                            new CuiTextComponent
                             {
-                                new CuiTextComponent
-                                {
-                                    Text = $"x{vendingItem.Amount}",
-                                    Align = TextAnchor.LowerRight,
-                                    FontSize = 12,
-                                    Color = "0.65 0.65 0.65 1",
-                                    FadeIn = 0.1f,
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = UIConstants.AnchorMin,
-                                    AnchorMax = UIConstants.AnchorMax,
-                                    OffsetMin = $"{offsetX + 4} {offsetY + 1f}",
-                                    OffsetMax = $"{offsetX - 3f + OverlaySize} {offsetY + OverlaySize}",
-                                }
+                                Text = $"x{vendingItem.Amount}",
+                                Align = TextAnchor.LowerRight,
+                                FontSize = 12,
+                                Color = "0.65 0.65 0.65 1",
+                                FadeIn = 0.1f,
                             },
-                        }
-                    );
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = UIConstants.AnchorMin,
+                                AnchorMax = UIConstants.AnchorMax,
+                                OffsetMin = $"{offsetX + 4} {offsetY + 1f}",
+                                OffsetMax = $"{offsetX - 3f + OverlaySize} {offsetY + OverlaySize}",
+                            }
+                        },
+                    });
                 }
             }
         }
@@ -2552,8 +2543,7 @@ namespace Oxide.Plugins
             {
                 _formState.Broadcast = !_formState.Broadcast;
 
-                CuiHelper.DestroyUi(EditorPlayer, ContainerUIRenderer.BroadcastUIName);
-                CuiHelper.AddUi(EditorPlayer, ContainerUIRenderer.RenderBroadcastUI(EditorPlayer, _vendingMachine, _formState));
+                CuiHelper.AddUi(EditorPlayer, ContainerUIRenderer.RenderBroadcastUI(_vendingMachine, _formState));
             }
 
             public void ToggleDroneAccessible()
@@ -2568,8 +2558,7 @@ namespace Oxide.Plugins
                     _formState.DroneAccessible = !_formState.DroneAccessible;
                 }
 
-                CuiHelper.DestroyUi(EditorPlayer, ContainerUIRenderer.BroadcastUIName);
-                CuiHelper.AddUi(EditorPlayer, ContainerUIRenderer.RenderBroadcastUI(EditorPlayer, _vendingMachine, _formState));
+                CuiHelper.AddUi(EditorPlayer, ContainerUIRenderer.RenderBroadcastUI(_vendingMachine, _formState));
             }
 
             public void ApplyStateTo(VendingProfile profile)
@@ -2943,7 +2932,6 @@ namespace Oxide.Plugins
             public void ShowAdminUI(BasePlayer player)
             {
                 _adminUIViewers.Add(player);
-                CuiHelper.DestroyUi(player, AdminUIRenderer.UIName);
                 CuiHelper.AddUi(player, AdminUIRenderer.RenderAdminUI(Plugin, player, _vendingMachine, Profile));
             }
 
@@ -2954,7 +2942,6 @@ namespace Oxide.Plugins
                     return;
 
                 _shopUIViewers.Add(player);
-                CuiHelper.DestroyUi(player, ShopUIRenderer.UIName);
                 CuiHelper.AddUi(player, json);
             }
 
