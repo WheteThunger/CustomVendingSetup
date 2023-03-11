@@ -294,7 +294,7 @@ namespace Oxide.Plugins
 
             _reusableItemList.Clear();
 
-            if (offer.RefillDelay == 0)
+            if (offer.RefillDelay <= 0)
             {
                 // Don't change the stock amount. Instead, we will just leave the items in the vending machine.
                 // The "CanVendingStockRefill" hook will use this flag to skip all logic.
@@ -302,8 +302,6 @@ namespace Oxide.Plugins
             }
             else
             {
-                ItemUtils.TakeContainerItems(vendingMachine.inventory, ref sellItemQuery, sellAmount);
-
                 // The "CanVendingStockRefill" hook may use this to add stock.
                 _itemBeingSold = offer.SellItem;
             }
@@ -319,6 +317,13 @@ namespace Oxide.Plugins
             // These can now be unset since the "CanVendingStockRefill" hook can no longer be called after this point.
             _performingInstantRestock = false;
             _itemBeingSold = null;
+
+            if (offer.RefillDelay > 0)
+            {
+                // Remove stock only after the items have been given to the player,
+                // so that max stack size can be determined by an item in stock.
+                ItemUtils.TakeContainerItems(vendingMachine.inventory, ref sellItemQuery, sellAmount);
+            }
 
             vendingMachine.UpdateEmptyFlag();
 
