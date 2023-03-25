@@ -20,7 +20,7 @@ using CustomSaveDataCallback = System.Action<Newtonsoft.Json.Linq.JObject>;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.9.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.10.0")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
