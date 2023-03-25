@@ -14,7 +14,9 @@
 - Supports Economics and Server Rewards
 - Supports blueprints, as well as items with custom skins and names
 - Supports attachments and other child items
-- Supports ammo type and amount
+- Supports alternative ammo types and amounts
+
+Note: Does not affect player vending machines.
 
 ## Required plugins
 
@@ -140,16 +142,16 @@ If you want all items to show the same quantity in stock (e.g., 10 in stock), yo
 Example problem:
 
 - 1000 wood for 20 scrap (shows 10 in stock)
-- 500 wood for 150 stones (shows 20 in stock)
+- 500 wood for 150 stones (shows **20** in stock)
 
-Example solution A (stocks 10k wood total):
+Example solution A (stocks 10k wood total, same as original):
 
 - 1000 wood for 20 scrap (shows 10 in stock)
-- 1000 wood for 300 stones (shows 10 in stock)
+- **1000** wood for **300** stones (shows 10 in stock)
 
-Example solution B (stocks 5k wood total):
+Example solution B (stocks 5k wood total, half original):
 
-- 500 wood for 10 scrap (shows 10 in stock)
+- **500** wood for **10** scrap (shows 10 in stock)
 - 500 wood for 150 stones (shows 10 in stock)
 
 #### Why is stock different than vanilla?
@@ -191,7 +193,7 @@ Removes the vending machine's currently assigned data provider and calls the `On
 #### OnCustomVendingSetup
 
 ```csharp
-bool? OnCustomVendingSetup(NPCVendingMachine vendingMachine)
+object OnCustomVendingSetup(NPCVendingMachine vendingMachine)
 ```
 
 - Called when this plugin wants to internally register a monument vending machine to allow it to be edited
