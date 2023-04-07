@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.Serialization;
 using Facepunch;
 using UnityEngine;
 using VLB;
@@ -20,7 +21,7 @@ using CustomSaveDataCallback = System.Action<Newtonsoft.Json.Linq.JObject>;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.10.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.10.1")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -3279,6 +3280,8 @@ namespace Oxide.Plugins
         private class CaseInsensitiveDictionary<TValue> : Dictionary<string, TValue>
         {
             public CaseInsensitiveDictionary() : base(StringComparer.OrdinalIgnoreCase) {}
+
+            public CaseInsensitiveDictionary(Dictionary<string, TValue> dict) : base(dict, StringComparer.OrdinalIgnoreCase) {}
         }
 
         [JsonObject(MemberSerialization.OptIn)]
@@ -3495,6 +3498,24 @@ namespace Oxide.Plugins
             }
 
             public Item Create() => Create(Amount);
+
+            public VendingItem Copy()
+            {
+                return new VendingItem
+                {
+                    ShortName = ShortName,
+                    DisplayName = DisplayName,
+                    Amount = Amount,
+                    SkinId = SkinId,
+                    IsBlueprint = IsBlueprint,
+                    DataInt = DataInt,
+                    Position = Position,
+                    AmmoAmount = AmmoAmount,
+                    AmmoType = AmmoType,
+                    Capacity = Capacity,
+                    Contents = Contents,
+                };
+            }
         }
 
         [JsonObject(MemberSerialization.OptIn)]
@@ -3616,6 +3637,21 @@ namespace Oxide.Plugins
             public CaseInsensitiveDictionary<object> CustomSettings;
 
             public bool IsValid => SellItem.IsValid && CurrencyItem.IsValid;
+
+            public VendingOffer Copy()
+            {
+                return new VendingOffer
+                {
+                    SellItem = SellItem.Copy(),
+                    CurrencyItem = CurrencyItem.Copy(),
+                    RefillMax = RefillMax,
+                    RefillDelay = RefillDelay,
+                    RefillAmount = RefillAmount,
+                    CustomSettings = CustomSettings != null
+                        ? new CaseInsensitiveDictionary<object>(CustomSettings)
+                        : null,
+                };
+            }
         }
 
         [JsonObject(MemberSerialization.OptIn)]
@@ -3694,6 +3730,46 @@ namespace Oxide.Plugins
             public string GetMonumentAlias() => MonumentAlias;
             public Vector3 GetPosition() => Position;
             public Vector3 GetLegacyPosition() => LegacyPosition;
+
+            [OnDeserialized]
+            private void OnDeserialized(StreamingContext context)
+            {
+                UpdateOldSaddleOffers();
+            }
+
+            private void UpdateOldSaddleOffers()
+            {
+                if (Offers == null)
+                    return;
+
+                VendingOffer singleSaddleOffer = null;
+                var singleSaddleIndex = -1;
+
+                for (var i = 0; i < Offers.Length; i++)
+                {
+                    var offer = Offers[i];
+                    if (offer.SellItem.ShortName == "horse.saddle")
+                    {
+                        // Copy serialized fields, and change the short name. This will reset the cached ItemDefinition.
+                        offer.SellItem = offer.SellItem.Copy();
+                        offer.SellItem.ShortName = "horse.saddle.single";
+                        singleSaddleOffer = offer;
+                        singleSaddleIndex = i;
+                        break;
+                    }
+                }
+
+                if (singleSaddleOffer != null && singleSaddleIndex >= 0 && Offers.Length < MaxVendingOffers)
+                {
+                    var doubleSaddleOffer = singleSaddleOffer.Copy();
+                    doubleSaddleOffer.SellItem.ShortName = "horse.saddle.double";
+                    doubleSaddleOffer.CurrencyItem.Amount = Mathf.FloorToInt(doubleSaddleOffer.CurrencyItem.Amount * 1.2f);
+
+                    var newOfferList = new List<VendingOffer>(Offers);
+                    newOfferList.Insert(singleSaddleIndex + 1, doubleSaddleOffer);
+                    Offers = newOfferList.ToArray();
+                }
+            }
         }
 
         [JsonObject(MemberSerialization.OptIn)]
