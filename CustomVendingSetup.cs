@@ -2332,19 +2332,6 @@ namespace Oxide.Plugins
                 _dataProviderRegistry = dataProviderRegistry;
             }
 
-            public bool HasAnyPaymentProviderCurrency()
-            {
-                foreach (var controller in _uniqueControllers)
-                {
-                    var profile = controller.Profile;
-                    if (profile.HasPaymentProviderCurrency(_plugin._config.Economics)
-                        || profile.HasPaymentProviderCurrency(_plugin._config.ServerRewards))
-                        return true;
-                }
-
-                return false;
-            }
-
             public void HandleVendingMachineSpawned(NPCVendingMachine vendingMachine)
             {
                 if (GetController(vendingMachine) != null)
