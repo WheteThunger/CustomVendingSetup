@@ -21,7 +21,7 @@ using CustomSaveDataCallback = System.Action<Newtonsoft.Json.Linq.JObject>;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.10.1")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.10.2")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -994,7 +994,7 @@ namespace Oxide.Plugins
             return highestUsedSlot;
         }
 
-        private static void AddItemForNetwork(ProtoBuf.ItemContainer containerData, int slot, int itemId, int amount, uint uid)
+        private static void AddItemForNetwork(ProtoBuf.ItemContainer containerData, int slot, int itemId, int amount, ItemId uid)
         {
             var itemData = Pool.Get<ProtoBuf.Item>();
             itemData.slot = slot;
@@ -1058,7 +1058,7 @@ namespace Oxide.Plugins
                     slot: nextInvisibleSlot,
                     itemId: _config.Economics.ItemDefinition.itemid,
                     amount: _paymentProviderResolver.EconomicsPaymentProvider.GetBalance(player),
-                    uid: uint.MaxValue - (uint)nextInvisibleSlot
+                    uid: new ItemId(ulong.MaxValue - (ulong)nextInvisibleSlot)
                 );
                 nextInvisibleSlot++;
             }
@@ -1070,7 +1070,7 @@ namespace Oxide.Plugins
                     slot: nextInvisibleSlot,
                     itemId: _config.ServerRewards.ItemDefinition.itemid,
                     amount: _paymentProviderResolver.ServerRewardsPaymentProvider.GetBalance(player),
-                    uid: uint.MaxValue - (uint)nextInvisibleSlot
+                    uid: new ItemId(ulong.MaxValue - (ulong)nextInvisibleSlot)
                 );
                 nextInvisibleSlot++;
             }
@@ -1119,11 +1119,11 @@ namespace Oxide.Plugins
             if (player.IsServer || !player.HasPermission(PermissionUse))
                 return false;
 
-            uint vendingMachineId;
-            if (args.Length == 0 || !uint.TryParse(args[0], out vendingMachineId))
+            ulong vendingMachineId;
+            if (args.Length == 0 || !ulong.TryParse(args[0], out vendingMachineId))
                 return false;
 
-            vendingMachine = BaseNetworkable.serverEntities.Find(vendingMachineId) as NPCVendingMachine;
+            vendingMachine = BaseNetworkable.serverEntities.Find(new NetworkableId(vendingMachineId)) as NPCVendingMachine;
             if (vendingMachine == null)
                 return false;
 
@@ -1235,7 +1235,7 @@ namespace Oxide.Plugins
                 var saveButtonText = plugin.GetMessage(player, Lang.ButtonSave);
                 var cancelButtonText = plugin.GetMessage(player, Lang.ButtonCancel);
 
-                var vendingMachineId = vendingMachine.net.ID;
+                var vendingMachineId = vendingMachine.net.ID.Value;
 
                 AddButton(
                     cuiElements,
@@ -1433,7 +1433,7 @@ namespace Oxide.Plugins
                 return CuiHelper.ToJson(cuiElements);
             }
 
-            private static void AddButton(CuiElementContainer cuiElements, uint vendingMachineId, string text, string subCommand, float xMax, string color, string textColor)
+            private static void AddButton(CuiElementContainer cuiElements, ulong vendingMachineId, string text, string subCommand, float xMax, string color, string textColor)
             {
                 var xMin = xMax - UIConstants.ButtonWidth;
 
@@ -1497,7 +1497,7 @@ namespace Oxide.Plugins
                 };
 
                 var buttonIndex = 0;
-                var vendingMachineId = vendingMachine.net.ID;
+                var vendingMachineId = vendingMachine.net.ID.Value;
 
                 if (profile != null)
                 {
@@ -1517,7 +1517,7 @@ namespace Oxide.Plugins
                 return UIConstants.PanelWidth - reverseButtonIndex * (UIConstants.ButtonWidth + UIConstants.ButtonHorizontalSpacing);
             }
 
-            private static void AddVendingButton(CuiElementContainer cuiElements, uint vendingMachineId, string text, string subCommand, int reverseButtonIndex, string color, string textColor)
+            private static void AddVendingButton(CuiElementContainer cuiElements, ulong vendingMachineId, string text, string subCommand, int reverseButtonIndex, string color, string textColor)
             {
                 var xMax = GetButtonOffset(reverseButtonIndex);
                 var xMin = xMax - UIConstants.ButtonWidth;
@@ -2322,7 +2322,7 @@ namespace Oxide.Plugins
             private HashSet<BaseVendingController> _uniqueControllers = new HashSet<BaseVendingController>();
 
             // Controllers are also cached by vending machine, in case MonumentFinder is unloaded or becomes unstable.
-            private Dictionary<uint, BaseVendingController> _controllersByVendingMachine = new Dictionary<uint, BaseVendingController>();
+            private Dictionary<NetworkableId, BaseVendingController> _controllersByVendingMachine = new Dictionary<NetworkableId, BaseVendingController>();
 
             private Dictionary<DataProvider, CustomVendingController> _controllersByDataProvider = new Dictionary<DataProvider, CustomVendingController>();
 
