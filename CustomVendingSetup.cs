@@ -358,6 +358,16 @@ namespace Oxide.Plugins
             ScheduleRemoveUI(vendingMachine, player, component);
         }
 
+        private object OnNpcGiveSoldItem(NPCVendingMachine vendingMachine, Item item, BasePlayer player)
+        {
+            if (!IsCustomized(vendingMachine))
+                return null;
+
+            // Simply give the item, without splitting it, since stack size logic has already been taken into account.
+            player.GiveItem(item);
+            return False;
+        }
+
         // This hook is exposed by plugin: Vending In Stock (VendingInStock).
         private object CanVendingStockRefill(NPCVendingMachine vendingMachine, Item soldItem, BasePlayer player)
         {
