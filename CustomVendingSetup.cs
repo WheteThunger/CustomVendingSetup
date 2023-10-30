@@ -3877,7 +3877,7 @@ namespace Oxide.Plugins
         private class ShopUISettings
         {
             [JsonProperty("Enable skin overlays")]
-            public bool EnableSkinOverlays = false;
+            public bool EnableSkinOverlays = true;
         }
 
         [JsonObject(MemberSerialization.OptIn)]

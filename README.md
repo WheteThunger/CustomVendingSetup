@@ -59,7 +59,7 @@ Default configuration:
 ```json
 {
   "Shop UI settings": {
-    "Enable skin overlays": false
+    "Enable skin overlays": true
   },
   "Economics integration": {
     "Enabled": false,
@@ -76,7 +76,7 @@ Default configuration:
 ```
 
 - `Shop UI settings`
-  - `Enable skin overlays` (`true` or `false`) -- While `true`, skin images will be overlayed on top of items when needed. For example, to display currency skin.
+  - `Enable skin overlays` (`true` or `false`) -- While `true`, skin images will be overlaid on top of items when needed. For example, to display currency skin.
 - `Economics integration` -- Controls integration with the Economics plugin.
   - `Enabled` (`true` or `false`) -- Determines whether Economics integration is enabled. While enabled, the below configured item will be used as a proxy to configure vending machines to buy and sell Economics currency.
   - `Item short name` -- Determines the item that will be associated with Economics currency. When you want to configure a sale offer to buy or sell Economics currency, you must place this item into the corresponding "For Sale" or "Currency" column while editing the vending machine. Whichever item you configure here will be displayed in the shop view, though you may cover it up with the image of a skin by setting a non-`0` `Item skin ID` and setting `Enable skin overlays` to `true`.
