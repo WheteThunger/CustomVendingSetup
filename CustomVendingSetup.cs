@@ -1222,7 +1222,7 @@ namespace Oxide.Plugins
             public static string RenderContainerUI(CustomVendingSetup plugin, BasePlayer player, NPCVendingMachine vendingMachine, EditFormState uiState)
             {
                 var offsetX = 192;
-                var offsetY = 141;
+                var offsetY = 142.5f;
 
                 var cuiElements = new CuiElementContainer
                 {
@@ -1483,7 +1483,7 @@ namespace Oxide.Plugins
             public static string RenderAdminUI(CustomVendingSetup plugin, BasePlayer player, NPCVendingMachine vendingMachine, VendingProfile profile)
             {
                 var numSellOrders = vendingMachine.sellOrders?.sellOrders.Count ?? 0;
-                var offsetY = 136 + 74 * numSellOrders;
+                var offsetY = 137.5f + 74 * numSellOrders;
                 var offsetX = 192;
 
                 var cuiElements = new CuiElementContainer
@@ -1642,7 +1642,7 @@ namespace Oxide.Plugins
             private static void AddItemOverlay(CuiElementContainer cuiElements, int indexFromBottom, VendingOffer offer, bool isCurrency = false)
             {
                 var offsetX = isCurrency ? OffsetXCurrency : OffsetXItem;
-                var offsetY = 40 + 74 * indexFromBottom;
+                var offsetY = 41.5f + 74 * indexFromBottom;
 
                 var vendingItem = isCurrency ? offer.CurrencyItem : offer.SellItem;
 
