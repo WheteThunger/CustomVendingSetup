@@ -7,7 +7,6 @@ using Oxide.Game.Rust.Cui;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Globalization;
 using System.Linq;
 using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
@@ -58,8 +57,8 @@ namespace Oxide.Plugins
         private readonly object False = false;
 
         private ItemRetrieverAdapter _itemRetrieverAdapter;
-        private DataProviderRegistry _dataProviderRegistry = new DataProviderRegistry();
-        private ComponentTracker<NPCVendingMachine, VendingMachineComponent> _componentTracker = new ComponentTracker<NPCVendingMachine, VendingMachineComponent>();
+        private DataProviderRegistry _dataProviderRegistry = new();
+        private ComponentTracker<NPCVendingMachine, VendingMachineComponent> _componentTracker = new();
         private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
         private MonumentFinderAdapter _monumentFinderAdapter;
         private VendingMachineManager _vendingMachineManager;
@@ -72,8 +71,8 @@ namespace Oxide.Plugins
         private bool _isServerInitialized;
         private bool _performingInstantRestock;
         private VendingItem _itemBeingSold;
-        private Dictionary<string, object> _itemRetrieverQuery = new Dictionary<string, object>();
-        private List<Item> _reusableItemList = new List<Item>();
+        private Dictionary<string, object> _itemRetrieverQuery = new();
+        private List<Item> _reusableItemList = new();
         private object[] _objectArray1 = new object[1];
         private object[] _objectArray2 = new object[2];
 
@@ -169,6 +168,7 @@ namespace Oxide.Plugins
                         // Delay to ensure MonumentFinder's `OnServerInitialized` method is called.
                         NextTick(_vendingMachineManager.SetupAll);
                     }
+
                     return;
                 }
 
@@ -411,6 +411,7 @@ namespace Oxide.Plugins
             {
                 newItem.Remove();
             }
+
             vendingMachine.transactionActive = false;
 
             return False;
@@ -510,11 +511,15 @@ namespace Oxide.Plugins
                 _monumentInfo = monumentInfo;
             }
 
-            public Vector3 InverseTransformPoint(Vector3 worldPosition) =>
-                ((Func<Vector3, Vector3>)_monumentInfo["InverseTransformPoint"]).Invoke(worldPosition);
+            public Vector3 InverseTransformPoint(Vector3 worldPosition)
+            {
+                return ((Func<Vector3, Vector3>)_monumentInfo["InverseTransformPoint"]).Invoke(worldPosition);
+            }
 
-            public bool IsInBounds(Vector3 position) =>
-                ((Func<Vector3, bool>)_monumentInfo["IsInBounds"]).Invoke(position);
+            public bool IsInBounds(Vector3 position)
+            {
+                return ((Func<Vector3, bool>)_monumentInfo["IsInBounds"]).Invoke(position);
+            }
         }
 
         private class MonumentFinderAdapter
@@ -529,8 +534,7 @@ namespace Oxide.Plugins
 
             public MonumentAdapter GetMonumentAdapter(Vector3 position)
             {
-                var dictResult = _monumentFinder?.Call("API_GetClosest", position) as Dictionary<string, object>;
-                if (dictResult == null)
+                if (_monumentFinder?.Call("API_GetClosest", position) is not Dictionary<string, object> dictResult)
                     return null;
 
                 var monument = new MonumentAdapter(dictResult);
@@ -583,7 +587,7 @@ namespace Oxide.Plugins
                     return;
 
                 var result = _plugin.BagOfHolding.Call("API_SetLimitProfile", container, _limitProfile);
-                if (!(result is bool) || (bool)result == false)
+                if (result is not true)
                 {
                     LogError("Failed to set limit profile for vending container");
                 }
@@ -691,9 +695,7 @@ namespace Oxide.Plugins
             if (args.Length < 2)
                 return;
 
-            NPCVendingMachine vendingMachine;
-            BaseVendingController vendingController;
-            if (!PassesUICommandChecks(player, args, out vendingMachine, out vendingController))
+            if (!PassesUICommandChecks(player, args, out var vendingMachine, out var vendingController))
                 return;
 
             var basePlayer = player.Object as BasePlayer;
@@ -763,7 +765,7 @@ namespace Oxide.Plugins
 
         private static bool HasCondition(ItemDefinition itemDefinition)
         {
-            return itemDefinition.condition.enabled && itemDefinition.condition.max > 0;
+            return itemDefinition.condition is { enabled: true, max: > 0 };
         }
 
         private static void OpenVendingMachine(BasePlayer player, NPCVendingMachine vendingMachine)
@@ -851,6 +853,7 @@ namespace Oxide.Plugins
             {
                 lines.Add($"{entry.Key}: {entry.Value}");
             }
+
             return string.Join("\n", lines);
         }
 
@@ -918,7 +921,9 @@ namespace Oxide.Plugins
                 var destinationSlot = OrderIndexToSlot(orderIndex);
 
                 if (!settingsItem.MoveToContainer(container, destinationSlot + 2))
+                {
                     settingsItem.Remove();
+                }
             }
 
             var generalSettingsItem = ItemManager.Create(plugin._noteItemDefinition);
@@ -936,7 +941,9 @@ namespace Oxide.Plugins
 
                 generalSettingsItem.text = CreateNoteContents(settingsMap);
                 if (!generalSettingsItem.MoveToContainer(container, GeneralSettingsNoteSlot))
+                {
                     generalSettingsItem.Remove();
+                }
             }
 
             return containerEntity;
@@ -966,6 +973,7 @@ namespace Oxide.Plugins
                         player.GiveItem(ammoItem);
                     }
                 }
+
                 return;
             }
 
@@ -1007,9 +1015,8 @@ namespace Oxide.Plugins
         {
             var highestUsedSlot = -1;
 
-            for (var i = 0; i < containerData.contents.Count; i++)
+            foreach (var item in containerData.contents)
             {
-                var item = containerData.contents[i];
                 if (item.slot > highestUsedSlot)
                 {
                     highestUsedSlot = item.slot;
@@ -1124,16 +1131,24 @@ namespace Oxide.Plugins
             _itemRetrieverQuery["RequireEmpty"] = True;
 
             if (itemQuery.BlueprintId != 0)
+            {
                 _itemRetrieverQuery["BlueprintId"] = ObjectCache.Get(itemQuery.BlueprintId);
+            }
 
             if (itemQuery.DataInt != 0)
+            {
                 _itemRetrieverQuery["DataInt"] = ObjectCache.Get(itemQuery.DataInt);
+            }
 
             if (itemQuery.ItemId != 0)
+            {
                 _itemRetrieverQuery["ItemId"] = ObjectCache.Get(itemQuery.ItemId);
+            }
 
             if (itemQuery.SkinId.HasValue)
+            {
                 _itemRetrieverQuery["SkinId"] = ObjectCache.Get(itemQuery.SkinId.Value);
+            }
 
             return _itemRetrieverQuery;
         }
@@ -1158,8 +1173,7 @@ namespace Oxide.Plugins
             if (player.IsServer || !player.HasPermission(PermissionUse))
                 return false;
 
-            ulong vendingMachineId;
-            if (args.Length == 0 || !ulong.TryParse(args[0], out vendingMachineId))
+            if (args.Length == 0 || !ulong.TryParse(args[0], out var vendingMachineId))
                 return false;
 
             vendingMachine = BaseNetworkable.serverEntities.Find(new NetworkableId(vendingMachineId)) as NPCVendingMachine;
@@ -1268,7 +1282,7 @@ namespace Oxide.Plugins
                         },
                         "Hud.Menu",
                         UIName
-                    }
+                    },
                 };
 
                 var saveButtonText = plugin.GetMessage(player, Lang.ButtonSave);
@@ -1316,7 +1330,7 @@ namespace Oxide.Plugins
                             AnchorMax = UIConstants.AnchorMax,
                             OffsetMin = $"0 {headerOffset - UIConstants.HeaderHeight}",
                             OffsetMax = $"{UIConstants.PanelWidth} {headerOffset}",
-                        }
+                        },
                     },
                 });
 
@@ -1355,7 +1369,7 @@ namespace Oxide.Plugins
                             AnchorMax = "0 0",
                             OffsetMin = $"{xMin} 0",
                             OffsetMax = $"{xMax} {UIConstants.HeaderHeight}",
-                        }
+                        },
                     },
                     TipUIName
                 );
@@ -1530,8 +1544,8 @@ namespace Oxide.Plugins
                                 AnchorMax = UIConstants.AnchorMax,
                                 OffsetMin = $"{offsetX} {offsetY}",
                                 OffsetMax = $"{offsetX} {offsetY}",
-                            }
-                        }
+                            },
+                        },
                     },
                 };
 
@@ -1617,8 +1631,8 @@ namespace Oxide.Plugins
                             {
                                 AnchorMin = UIConstants.AnchorMin,
                                 AnchorMax = UIConstants.AnchorMax,
-                            }
-                        }
+                            },
+                        },
                     },
                 };
 
@@ -1632,8 +1646,7 @@ namespace Oxide.Plugins
 
                     numValidOffers++;
 
-                    HashSet<ulong> skins;
-                    if (!skinsByItemShortName.TryGetValue(offer.SellItem.ShortName, out skins))
+                    if (!skinsByItemShortName.TryGetValue(offer.SellItem.ShortName, out var skins))
                     {
                         skins = new HashSet<ulong>();
                         skinsByItemShortName[offer.SellItem.ShortName] = skins;
@@ -1693,7 +1706,7 @@ namespace Oxide.Plugins
                             AnchorMax = UIConstants.AnchorMax,
                             OffsetMin = $"{offsetX} {offsetY}",
                             OffsetMax = $"{offsetX + OverlaySize} {offsetY + OverlaySize}",
-                        }
+                        },
                     },
                 });
 
@@ -1716,9 +1729,9 @@ namespace Oxide.Plugins
                             AnchorMin = "0 0",
                             AnchorMax = "0 0",
                             OffsetMin = $"{offsetX + PaddingLeft} {offsetY + PaddingBottom}",
-                            OffsetMax = $"{offsetX + PaddingLeft + IconSize} {offsetY + PaddingBottom + IconSize}"
+                            OffsetMax = $"{offsetX + PaddingLeft + IconSize} {offsetY + PaddingBottom + IconSize}",
                         },
-                    }
+                    },
                 });
 
                 if (vendingItem.Amount > 1)
@@ -1743,7 +1756,7 @@ namespace Oxide.Plugins
                                 AnchorMax = UIConstants.AnchorMax,
                                 OffsetMin = $"{offsetX + 4} {offsetY + 1f}",
                                 OffsetMax = $"{offsetX - 3f + OverlaySize} {offsetY + OverlaySize}",
-                            }
+                            },
                         },
                     });
                 }
@@ -1756,27 +1769,26 @@ namespace Oxide.Plugins
 
         private static class StringUtils
         {
-            public static bool Equals(string a, string b) =>
-                string.Compare(a, b, StringComparison.OrdinalIgnoreCase) == 0;
-
-            public static bool Contains(string haystack, string needle) =>
-                haystack.Contains(needle, CompareOptions.IgnoreCase);
+            public static bool EqualsCaseInsensitive(string a, string b)
+            {
+                return string.Compare(a, b, StringComparison.OrdinalIgnoreCase) == 0;
+            }
         }
 
         private static class ObjectCache
         {
             private static class StaticObjectCache<T>
             {
-                private static readonly Dictionary<T, object> _cacheByValue = new Dictionary<T, object>();
+                private static readonly Dictionary<T, object> _cacheByValue = new();
 
                 public static object Get(T value)
                 {
-                    object cachedObject;
-                    if (!_cacheByValue.TryGetValue(value, out cachedObject))
+                    if (!_cacheByValue.TryGetValue(value, out var cachedObject))
                     {
                         cachedObject = value;
                         _cacheByValue[value] = cachedObject;
                     }
+
                     return cachedObject;
                 }
 
@@ -1943,13 +1955,13 @@ namespace Oxide.Plugins
             public bool AddBalance(BasePlayer player, int amount, TransactionContext transaction)
             {
                 var result = _plugin.CallPlugin(_ownerPlugin, "Deposit", player.userID, Convert.ToDouble(amount));
-                return result is bool && (bool)result;
+                return result is true;
             }
 
             public bool TakeBalance(BasePlayer player, int amount, List<Item> collect)
             {
                 var result = _plugin.CallPlugin(_ownerPlugin, "Withdraw", player.userID, Convert.ToDouble(amount));
-                return result is bool && (bool)result;
+                return result is true;
             }
         }
 
@@ -1973,13 +1985,13 @@ namespace Oxide.Plugins
             public bool AddBalance(BasePlayer player, int amount, TransactionContext transaction)
             {
                 var result = _plugin.CallPlugin(_ownerPlugin, "AddPoints", player.userID, amount);
-                return result is bool && (bool)result;
+                return result is true;
             }
 
             public bool TakeBalance(BasePlayer player, int amount, List<Item> collect)
             {
                 var result = _plugin.CallPlugin(_ownerPlugin, "TakePoints", player.userID, amount);
-                return result is bool && (bool)result;
+                return result is true;
             }
         }
 
@@ -2077,7 +2089,7 @@ namespace Oxide.Plugins
                 if (MinCondition > 0 && item.hasCondition && (item.conditionNormalized < MinCondition || item.maxConditionNormalized < MinCondition))
                     return 0;
 
-                if (!string.IsNullOrEmpty(DisplayName) && !StringUtils.Equals(DisplayName, item.name))
+                if (!string.IsNullOrEmpty(DisplayName) && !StringUtils.EqualsCaseInsensitive(DisplayName, item.name))
                     return 0;
 
                 return RequireEmpty && item.contents?.itemList?.Count > 0
@@ -2204,7 +2216,7 @@ namespace Oxide.Plugins
         private class DynamicHookSubscriber<T>
         {
             private CustomVendingSetup _plugin;
-            private HashSet<T> _list = new HashSet<T>();
+            private HashSet<T> _list = new();
             private string[] _hookNames;
 
             public DynamicHookSubscriber(CustomVendingSetup plugin, params string[] hookNames)
@@ -2264,14 +2276,12 @@ namespace Oxide.Plugins
                     Spec = spec,
                 };
 
-                object getDataCallback, saveDataCallback;
-
-                if (spec.TryGetValue("GetData", out getDataCallback))
+                if (spec.TryGetValue("GetData", out var getDataCallback))
                 {
                     dataProvider.GetDataCallback = getDataCallback as CustomGetDataCallback;
                 }
 
-                if (spec.TryGetValue("SaveData", out saveDataCallback))
+                if (spec.TryGetValue("SaveData", out var saveDataCallback))
                 {
                     dataProvider.SaveDataCallback = saveDataCallback as CustomSaveDataCallback;
                 }
@@ -2296,21 +2306,11 @@ namespace Oxide.Plugins
             public CustomSaveDataCallback SaveDataCallback;
 
             private VendingProfile _vendingProfile;
-            private JObject _serializedData;
 
             public VendingProfile GetData(Configuration config)
             {
-                if (_vendingProfile == null)
-                {
-                    _vendingProfile = GetDataCallback()?.ToObject<VendingProfile>();
-                }
-
-                if (_vendingProfile?.Offers == null)
-                {
-                    return null;
-                }
-
-                return _vendingProfile;
+                _vendingProfile ??= GetDataCallback()?.ToObject<VendingProfile>();
+                return _vendingProfile?.Offers == null ? null : _vendingProfile;
             }
 
             public void SaveData(VendingProfile vendingProfile)
@@ -2322,12 +2322,11 @@ namespace Oxide.Plugins
 
         private class DataProviderRegistry
         {
-            private Dictionary<Dictionary<string, object>, DataProvider> _dataProviderCache = new Dictionary<Dictionary<string, object>, DataProvider>();
+            private Dictionary<Dictionary<string, object>, DataProvider> _dataProviderCache = new();
 
             public DataProvider Register(Dictionary<string, object> dataProviderSpec)
             {
-                DataProvider dataProvider;
-                if (!_dataProviderCache.TryGetValue(dataProviderSpec, out dataProvider))
+                if (!_dataProviderCache.TryGetValue(dataProviderSpec, out var dataProvider))
                 {
                     dataProvider = DataProvider.FromDictionary(dataProviderSpec);
                     if (dataProvider == null)
@@ -2358,12 +2357,12 @@ namespace Oxide.Plugins
             private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
             private DataProviderRegistry _dataProviderRegistry;
 
-            private HashSet<BaseVendingController> _uniqueControllers = new HashSet<BaseVendingController>();
+            private HashSet<BaseVendingController> _uniqueControllers = new();
 
             // Controllers are also cached by vending machine, in case MonumentFinder is unloaded or becomes unstable.
-            private Dictionary<NetworkableId, BaseVendingController> _controllersByVendingMachine = new Dictionary<NetworkableId, BaseVendingController>();
+            private Dictionary<NetworkableId, BaseVendingController> _controllersByVendingMachine = new();
 
-            private Dictionary<DataProvider, CustomVendingController> _controllersByDataProvider = new Dictionary<DataProvider, CustomVendingController>();
+            private Dictionary<DataProvider, CustomVendingController> _controllersByDataProvider = new();
 
             public VendingMachineManager(CustomVendingSetup plugin, ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, DataProviderRegistry dataProviderRegistry)
             {
@@ -2393,7 +2392,7 @@ namespace Oxide.Plugins
                     }
 
                     var hookResult = ExposedHooks.OnCustomVendingSetup(vendingMachine);
-                    if (hookResult is bool && !(bool)hookResult)
+                    if (hookResult is false)
                         return;
 
                     controller = EnsureCustomController(dataProvider);
@@ -2408,7 +2407,7 @@ namespace Oxide.Plugins
                     }
 
                     var hookResult = ExposedHooks.OnCustomVendingSetup(vendingMachine);
-                    if (hookResult is bool && !(bool)hookResult)
+                    if (hookResult is false)
                         return;
 
                     controller = EnsureMonumentController(location);
@@ -2431,8 +2430,7 @@ namespace Oxide.Plugins
                 {
                     _uniqueControllers.Remove(controller);
 
-                    var customController = controller as CustomVendingController;
-                    if (customController != null)
+                    if (controller is CustomVendingController customController)
                     {
                         _controllersByDataProvider.Remove(customController.DataProvider);
                         _dataProviderRegistry.Unregister(customController.DataProvider);
@@ -2442,8 +2440,7 @@ namespace Oxide.Plugins
 
             public BaseVendingController GetController(NPCVendingMachine vendingMachine)
             {
-                BaseVendingController controller;
-                return _controllersByVendingMachine.TryGetValue(vendingMachine.net.ID, out controller)
+                return _controllersByVendingMachine.TryGetValue(vendingMachine.net.ID, out var controller)
                     ? controller
                     : null;
             }
@@ -2472,11 +2469,8 @@ namespace Oxide.Plugins
             {
                 foreach (var controller in _uniqueControllers)
                 {
-                    var locationBasedController = controller as MonumentVendingController;
-                    if (locationBasedController == null)
-                    {
+                    if (controller is not MonumentVendingController locationBasedController)
                         continue;
-                    }
 
                     if (LocationsMatch(locationBasedController.Location, location))
                         return locationBasedController;
@@ -2489,9 +2483,7 @@ namespace Oxide.Plugins
             {
                 var controller = GetControllerByLocation(location);
                 if (controller != null)
-                {
                     return controller;
-                }
 
                 controller = new MonumentVendingController(_plugin, _componentFactory, location);
                 _uniqueControllers.Add(controller);
@@ -2501,8 +2493,7 @@ namespace Oxide.Plugins
 
             private CustomVendingController GetControllerByDataProvider(DataProvider dataProvider)
             {
-                CustomVendingController controller;
-                return _controllersByDataProvider.TryGetValue(dataProvider, out controller)
+                return _controllersByDataProvider.TryGetValue(dataProvider, out var controller)
                     ? controller
                     : null;
             }
@@ -2562,7 +2553,7 @@ namespace Oxide.Plugins
                 player.ClientRPCPlayer(null, player, "RPC_OpenLootPanel", containerEntity.panelName);
             }
 
-            public BasePlayer EditorPlayer { get; private set; }
+            public BasePlayer EditorPlayer { get; }
 
             private CustomVendingSetup _plugin;
             private BaseVendingController _vendingController;
@@ -2665,9 +2656,7 @@ namespace Oxide.Plugins
             private void KillContainer()
             {
                 if (_container == null || _container.IsDestroyed)
-                {
                     return;
-                }
 
                 if (EditorPlayer != null && !EditorPlayer.IsDestroyed && EditorPlayer.IsConnected)
                 {
@@ -2697,7 +2686,7 @@ namespace Oxide.Plugins
             protected CustomVendingSetup _plugin;
 
             // List of vending machines with a position matching this controller.
-            private HashSet<NPCVendingMachine> _vendingMachineList = new HashSet<NPCVendingMachine>();
+            private HashSet<NPCVendingMachine> _vendingMachineList = new();
 
             private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
 
@@ -2782,15 +2771,10 @@ namespace Oxide.Plugins
 
             public string GetShopUI()
             {
-                if (_cachedShopUI == null)
-                {
-                    _cachedShopUI = ShopUIRenderer.RenderShopUI(Profile);
-                }
-
-                return _cachedShopUI;
+                return _cachedShopUI ??= ShopUIRenderer.RenderShopUI(Profile);
             }
 
-            public void UpdateDroneAccessibility()
+            protected void UpdateDroneAccessibility()
             {
                 if (Profile == null)
                     return;
@@ -2807,10 +2791,7 @@ namespace Oxide.Plugins
 
             protected virtual void CreateOrUpdateProfile(NPCVendingMachine vendingMachine)
             {
-                if (Profile == null)
-                {
-                    Profile = VendingProfile.FromVendingMachine(vendingMachine);
-                }
+                Profile ??= VendingProfile.FromVendingMachine(vendingMachine);
             }
 
             private void SetupVendingMachines()
@@ -2832,7 +2813,7 @@ namespace Oxide.Plugins
 
         private class CustomVendingController : BaseVendingController
         {
-            public DataProvider DataProvider { get; private set; }
+            public DataProvider DataProvider { get; }
 
             public CustomVendingController(CustomVendingSetup plugin, ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, DataProvider dataProvider)
                 : base(plugin, componentFactory)
@@ -2908,7 +2889,7 @@ namespace Oxide.Plugins
             where THost : UnityEngine.Component
             where TGuest : UnityEngine.Component
         {
-            private readonly Dictionary<THost, TGuest> _hostToGuest = new Dictionary<THost, TGuest>();
+            private readonly Dictionary<THost, TGuest> _hostToGuest = new();
 
             public void RegisterComponent(THost host, TGuest guest)
             {
@@ -2917,8 +2898,7 @@ namespace Oxide.Plugins
 
             public TGuest GetComponent(THost host)
             {
-                TGuest guest;
-                return _hostToGuest.TryGetValue(host, out guest)
+                return _hostToGuest.TryGetValue(host, out var guest)
                     ? guest
                     : null;
             }
@@ -2986,8 +2966,8 @@ namespace Oxide.Plugins
 
             public VendingProfile Profile { get; private set; }
 
-            private readonly List<BasePlayer> _adminUIViewers = new List<BasePlayer>();
-            private readonly List<BasePlayer> _shopUIViewers = new List<BasePlayer>();
+            private readonly List<BasePlayer> _adminUIViewers = new();
+            private readonly List<BasePlayer> _shopUIViewers = new();
             private BaseVendingController _vendingController;
             private NPCVendingMachine _vendingMachine;
             private float[] _refillTimes;
@@ -3093,12 +3073,8 @@ namespace Oxide.Plugins
                 _vendingMachine.ClearSellOrders();
 
                 _originalSkinId = _vendingMachine.skinID;
-
-                if (_originalShopName == null)
-                    _originalShopName = _vendingMachine.shopName;
-
-                if (_originalBroadcast == null)
-                    _originalBroadcast = _vendingMachine.IsBroadcasting();
+                _originalShopName ??= _vendingMachine.shopName;
+                _originalBroadcast ??= _vendingMachine.IsBroadcasting();
 
                 _vendingMachine.skinID = profile.SkinId;
 
@@ -3119,7 +3095,7 @@ namespace Oxide.Plugins
                     if (!offer.IsValid)
                         continue;
 
-                    var vendingOffer = new ProtoBuf.VendingMachine.SellOrder
+                    var vendingOffer = new SellOrder
                     {
                         ShouldPool = false,
                         itemToSellID = offer.SellItem.ItemId,
@@ -3196,7 +3172,7 @@ namespace Oxide.Plugins
                     }
                     catch (OverflowException ex)
                     {
-                        LogError($"Cannot multiply {refillNumberOfPurchases} by {offer.SellItem.Amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex.ToString());
+                        LogError($"Cannot multiply {refillNumberOfPurchases} by {offer.SellItem.Amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex);
 
                         // Prevent further refills to avoid spamming the console since this case cannot be fixed without editing the vending machine.
                         StopRefilling(offerIndex);
@@ -3216,7 +3192,7 @@ namespace Oxide.Plugins
                         }
                         catch (OverflowException ex)
                         {
-                            LogError($"Cannot add {refillAmount} to {existingItem.amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex.ToString());
+                            LogError($"Cannot add {refillAmount} to {existingItem.amount} because the result is too large. You have misconfigured the plugin. It is not necessary to stock that much of any item. Please reduce Max Stock or Refill Amount for item {offer.SellItem.ShortName}.\n" + ex);
 
                             // Reduce refill rate to avoid spamming the console.
                             ScheduleDelayedRefill(offerIndex, offer);
@@ -3324,14 +3300,14 @@ namespace Oxide.Plugins
 
         private class LegacyVendingOffer
         {
-            public LegacyVendingItem Currency = new LegacyVendingItem();
-            public LegacyVendingItem SellItem = new LegacyVendingItem();
+            public LegacyVendingItem Currency = new();
+            public LegacyVendingItem SellItem = new();
         }
 
         private class LegacyVendingProfile
         {
             public string Id;
-            public List<LegacyVendingOffer> Offers = new List<LegacyVendingOffer>();
+            public List<LegacyVendingOffer> Offers = new();
 
             public string Shortname;
             public Vector3 WorldPosition;
@@ -3357,8 +3333,7 @@ namespace Oxide.Plugins
         {
             public static VendingItem FromItem(Item item)
             {
-                ItemDefinition ammoType;
-                var ammoAmount = GetAmmoAmountAndType(item, out ammoType);
+                var ammoAmount = GetAmmoAmountAndType(item, out var ammoType);
 
                 return new VendingItem
                 {
@@ -3507,7 +3482,7 @@ namespace Oxide.Plugins
                     item.instanceData.dataInt = DataInt;
                 }
 
-                if (Contents != null && Contents.Count > 0)
+                if (Contents is { Count: > 0 })
                 {
                     if (item.contents == null)
                     {
@@ -3632,17 +3607,20 @@ namespace Oxide.Plugins
 
                     var localizedSettings = ParseSettings(settingsItem.text);
 
-                    int refillMax;
-                    if (TryParseIntKey(localizedSettings, refillMaxLabel, out refillMax))
+                    if (TryParseIntKey(localizedSettings, refillMaxLabel, out var refillMax))
+                    {
                         offer.RefillMax = refillMax;
+                    }
 
-                    int refillDelay;
-                    if (TryParseIntKey(localizedSettings, refillDelayLabel, out refillDelay))
+                    if (TryParseIntKey(localizedSettings, refillDelayLabel, out var refillDelay))
+                    {
                         offer.RefillDelay = refillDelay;
+                    }
 
-                    int refillAmount;
-                    if (TryParseIntKey(localizedSettings, refillAmountLabel, out refillAmount))
+                    if (TryParseIntKey(localizedSettings, refillAmountLabel, out var refillAmount))
+                    {
                         offer.RefillAmount = refillAmount;
+                    }
 
                     // Allow other plugins to parse the settings and populate custom settings.
                     // Other plugins determine data file keys, as well as localized option names.
@@ -3660,8 +3638,7 @@ namespace Oxide.Plugins
             private static bool TryParseIntKey(Dictionary<string, string> dict, string key, out int result)
             {
                 result = 0;
-                string stringValue;
-                return dict.TryGetValue(key, out stringValue)
+                return dict.TryGetValue(key, out var stringValue)
                     && int.TryParse(stringValue, out result);
             }
 
@@ -3754,9 +3731,8 @@ namespace Oxide.Plugins
             {
                 var sellOrderIndex = 0;
 
-                for (var offerIndex = 0; offerIndex < Offers.Length; offerIndex++)
+                foreach (var offer in Offers)
                 {
-                    var offer = Offers[offerIndex];
                     if (!offer.IsValid)
                         continue;
 
@@ -3835,7 +3811,7 @@ namespace Oxide.Plugins
             public List<LegacyVendingProfile> Vendings;
 
             [JsonProperty("VendingProfiles")]
-            public List<VendingProfile> VendingProfiles = new List<VendingProfile>();
+            public List<VendingProfile> VendingProfiles = new();
 
             public static SavedData Load()
             {
@@ -3891,8 +3867,10 @@ namespace Oxide.Plugins
                 return data;
             }
 
-            public void Save() =>
+            public void Save()
+            {
                 Interface.Oxide.DataFileSystem.WriteObject(nameof(CustomVendingSetup), this);
+            }
 
             public VendingProfile FindProfile(IMonumentRelativePosition location)
             {
@@ -3906,6 +3884,7 @@ namespace Oxide.Plugins
                             profile.Position = location.GetPosition();
                             profile.LegacyPosition = Vector3.zero;
                         }
+
                         return profile;
                     }
                 }
@@ -3963,16 +3942,16 @@ namespace Oxide.Plugins
         private class Configuration : SerializableConfiguration
         {
             [JsonProperty("Shop UI settings")]
-            public ShopUISettings ShopUISettings = new ShopUISettings();
+            public ShopUISettings ShopUISettings = new();
 
             [JsonProperty("Economics integration")]
-            public PaymentProviderConfig Economics = new PaymentProviderConfig();
+            public PaymentProviderConfig Economics = new();
 
             [JsonProperty("Server Rewards integration")]
-            public PaymentProviderConfig ServerRewards = new PaymentProviderConfig();
+            public PaymentProviderConfig ServerRewards = new();
 
             [JsonProperty("Override item max stack sizes (shortname: amount)")]
-            public Dictionary<string, int> ItemStackSizeOverrides = new Dictionary<string, int>();
+            public Dictionary<string, int> ItemStackSizeOverrides = new();
 
             public void Init()
             {
@@ -3992,8 +3971,7 @@ namespace Oxide.Plugins
             {
                 var maxStackSize = item.MaxStackable();
 
-                int overrideMaxStackSize;
-                if (ItemStackSizeOverrides.TryGetValue(item.info.shortname, out overrideMaxStackSize))
+                if (ItemStackSizeOverrides.TryGetValue(item.info.shortname, out var overrideMaxStackSize))
                 {
                     maxStackSize = Math.Max(maxStackSize, overrideMaxStackSize);
                 }
@@ -4002,7 +3980,7 @@ namespace Oxide.Plugins
             }
         }
 
-        private Configuration GetDefaultConfig() => new Configuration();
+        private Configuration GetDefaultConfig() => new();
 
         #region Configuration Helpers
 
@@ -4044,17 +4022,14 @@ namespace Oxide.Plugins
 
         private bool MaybeUpdateConfigDict(Dictionary<string, object> currentWithDefaults, Dictionary<string, object> currentRaw)
         {
-            bool changed = false;
+            var changed = false;
 
             foreach (var key in currentWithDefaults.Keys)
             {
-                object currentRawValue;
-                if (currentRaw.TryGetValue(key, out currentRawValue))
+                if (currentRaw.TryGetValue(key, out var currentRawValue))
                 {
-                    var defaultDictValue = currentWithDefaults[key] as Dictionary<string, object>;
                     var currentDictValue = currentRawValue as Dictionary<string, object>;
-
-                    if (defaultDictValue != null)
+                    if (currentWithDefaults[key] is Dictionary<string, object> defaultDictValue)
                     {
                         if (currentDictValue == null)
                         {
@@ -4125,9 +4100,6 @@ namespace Oxide.Plugins
 
         private string GetMessage(BasePlayer player, string messageName, params object[] args) =>
             GetMessage(player.UserIDString, messageName, args);
-
-        private void ReplyToPlayer(IPlayer player, string messageName, params object[] args) =>
-            player.Reply(string.Format(GetMessage(player, messageName), args));
 
         private void ChatMessage(BasePlayer player, string messageName, params object[] args) =>
             player.ChatMessage(string.Format(GetMessage(player, messageName), args));
