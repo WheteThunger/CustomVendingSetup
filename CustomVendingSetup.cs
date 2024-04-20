@@ -10,6 +10,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Runtime.Serialization;
+using System.Text.RegularExpressions;
 using Facepunch;
 using UnityEngine;
 using VLB;
@@ -43,11 +44,15 @@ namespace Oxide.Plugins
         // Going over 7 causes offers to get cut off regardless of resolution.
         private const int MaxVendingOffers = 7;
 
-        private const int ShopNameNoteSlot = 29;
+        private const int GeneralSettingsNoteSlot = 29;
         private const int ContainerCapacity = 30;
         private const int MaxItemRows = ContainerCapacity / ItemsPerRow;
         private const int BlueprintItemId = -996920608;
         private const float MinCurrencyCondition = 0.5f;
+
+        private const ulong NpcVendingMachineSkinId = 861142659;
+
+        private static readonly Regex KeyValueRegex = new(@"^([^:]+):(.+(?:\n[^:\n]+$)*)", RegexOptions.Compiled | RegexOptions.Multiline);
 
         private readonly object True = true;
         private readonly object False = false;
@@ -849,7 +854,7 @@ namespace Oxide.Plugins
             return string.Join("\n", lines);
         }
 
-        private static StorageContainer CreateOrdersContainer(CustomVendingSetup plugin, BasePlayer player, VendingOffer[] vendingOffers, string shopName)
+        private static StorageContainer CreateOrdersContainer(CustomVendingSetup plugin, NPCVendingMachine vendingMachine, BasePlayer player, VendingOffer[] vendingOffers)
         {
             var containerEntity = CreateContainerEntity(StoragePrefab);
 
@@ -919,8 +924,18 @@ namespace Oxide.Plugins
             var generalSettingsItem = ItemManager.Create(plugin._noteItemDefinition);
             if (generalSettingsItem != null)
             {
-                generalSettingsItem.text = shopName;
-                if (!generalSettingsItem.MoveToContainer(container, ShopNameNoteSlot))
+                var settingsMap = new CaseInsensitiveDictionary<string>();
+                if (vendingMachine is not InvisibleVendingMachine)
+                {
+                    var skinIdLabel = plugin.GetMessage(player, Lang.SettingsSkinId);
+                    settingsMap[skinIdLabel] = vendingMachine.skinID.ToString();
+                }
+
+                var shopNameLabel = plugin.GetMessage(player, Lang.SettingsShopName);
+                settingsMap[shopNameLabel] = vendingMachine.shopName;
+
+                generalSettingsItem.text = CreateNoteContents(settingsMap);
+                if (!generalSettingsItem.MoveToContainer(container, GeneralSettingsNoteSlot))
                     generalSettingsItem.Remove();
             }
 
@@ -1012,6 +1027,20 @@ namespace Oxide.Plugins
             itemData.amount = amount;
             itemData.UID = uid;
             containerData.contents.Add(itemData);
+        }
+
+        private static CaseInsensitiveDictionary<string> ParseSettings(string text)
+        {
+            var dict = new CaseInsensitiveDictionary<string>();
+            if (string.IsNullOrEmpty(text))
+                return dict;
+
+            foreach (Match match in KeyValueRegex.Matches(text))
+            {
+                dict[match.Groups[1].Value.Trim()] = match.Groups[2].Value.Trim();
+            }
+
+            return dict;
         }
 
         private object CallPlugin<T1>(Plugin plugin, string methodName, T1 arg1)
@@ -2550,7 +2579,7 @@ namespace Oxide.Plugins
 
                 var offers = vendingController.Profile?.Offers ?? GetOffersFromVendingMachine(vendingMachine);
 
-                _container = CreateOrdersContainer(plugin, editorPlayer, offers, vendingMachine.shopName);
+                _container = CreateOrdersContainer(plugin, vendingMachine, editorPlayer, offers);
                 _formState = EditFormState.FromVendingMachine(vendingController, vendingMachine);
                 EditContainerComponent.AddToContainer(plugin, _container, this);
                 _container.SendAsSnapshot(editorPlayer.Connection);
@@ -2587,10 +2616,32 @@ namespace Oxide.Plugins
                 profile.Broadcast = _formState.Broadcast;
                 profile.DroneAccessible = _formState.DroneAccessible;
 
-                var updatedShopName = _container.inventory.GetSlot(ShopNameNoteSlot)?.text.Trim();
-                if (!string.IsNullOrEmpty(updatedShopName))
+                var generalSettingsText = _container.inventory.GetSlot(GeneralSettingsNoteSlot)?.text.Trim();
+
+                if (!string.IsNullOrEmpty(generalSettingsText))
                 {
-                    profile.ShopName = updatedShopName;
+                    var settingsDict = ParseSettings(generalSettingsText);
+
+                    if (_vendingMachine is not InvisibleVendingMachine)
+                    {
+                        var skinIdKey = _plugin.GetMessage(EditorPlayer, Lang.SettingsSkinId);
+                        if (settingsDict.TryGetValue(skinIdKey, out var skinIdString)
+                            && ulong.TryParse(skinIdString, out var skinId))
+                        {
+                            profile.SkinId = skinId;
+                        }
+                        else
+                        {
+                            // Allow the user to revert to vanilla skin by simply removing the option.
+                            profile.SkinId = NpcVendingMachineSkinId;
+                        }
+                    }
+
+                    var shopNameKey = _plugin.GetMessage(EditorPlayer, Lang.SettingsShopName);
+                    if (settingsDict.TryGetValue(shopNameKey, out var shopName))
+                    {
+                        profile.ShopName = shopName;
+                    }
                 }
             }
 
@@ -2942,6 +2993,7 @@ namespace Oxide.Plugins
             private float[] _refillTimes;
 
             private string _originalShopName;
+            private ulong _originalSkinId;
             private bool? _originalBroadcast;
 
             public override void OnCreated()
@@ -3040,11 +3092,15 @@ namespace Oxide.Plugins
 
                 _vendingMachine.ClearSellOrders();
 
+                _originalSkinId = _vendingMachine.skinID;
+
                 if (_originalShopName == null)
                     _originalShopName = _vendingMachine.shopName;
 
                 if (_originalBroadcast == null)
                     _originalBroadcast = _vendingMachine.IsBroadcasting();
+
+                _vendingMachine.skinID = profile.SkinId;
 
                 if (!string.IsNullOrEmpty(profile.ShopName))
                 {
@@ -3234,6 +3290,8 @@ namespace Oxide.Plugins
             private void ResetToVanilla()
             {
                 CancelInvoke(TimedRefill);
+
+                _vendingMachine.skinID = _originalSkinId;
 
                 if (_originalShopName != null)
                 {
@@ -3572,7 +3630,7 @@ namespace Oxide.Plugins
                     var refillDelayLabel = plugin.GetMessage(player, Lang.SettingsRefillDelay);
                     var refillAmountLabel = plugin.GetMessage(player, Lang.SettingsRefillAmount);
 
-                    var localizedSettings = ParseSettingsItem(settingsItem);
+                    var localizedSettings = ParseSettings(settingsItem.text);
 
                     int refillMax;
                     if (TryParseIntKey(localizedSettings, refillMaxLabel, out refillMax))
@@ -3597,24 +3655,6 @@ namespace Oxide.Plugins
                 }
 
                 return offer;
-            }
-
-            private static CaseInsensitiveDictionary<string> ParseSettingsItem(Item settingsItem)
-            {
-                var dict = new CaseInsensitiveDictionary<string>();
-                if (string.IsNullOrEmpty(settingsItem.text))
-                    return dict;
-
-                foreach (var line in settingsItem.text.Split('\n'))
-                {
-                    var parts = line.Split(':');
-                    if (parts.Length < 2)
-                        continue;
-
-                    dict[parts[0].Trim()] = parts[1].Trim();
-                }
-
-                return dict;
             }
 
             private static bool TryParseIntKey(Dictionary<string, string> dict, string key, out int result)
@@ -3671,6 +3711,7 @@ namespace Oxide.Plugins
             {
                 return new VendingProfile
                 {
+                    SkinId = vendingMachine.skinID,
                     ShopName = vendingMachine.shopName,
                     Broadcast = vendingMachine.IsBroadcasting(),
                     Monument = location?.GetMonumentPrefabName(),
@@ -3678,6 +3719,10 @@ namespace Oxide.Plugins
                     Position = location?.GetPosition() ?? Vector3.zero,
                 };
             }
+
+            [JsonProperty("SkinId", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [DefaultValue(NpcVendingMachineSkinId)]
+            public ulong SkinId = NpcVendingMachineSkinId;
 
             [JsonProperty("ShopName", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public string ShopName;
@@ -4099,6 +4144,8 @@ namespace Oxide.Plugins
             public const string SettingsRefillMax = "Settings.RefillMax";
             public const string SettingsRefillDelay = "Settings.RefillDelay";
             public const string SettingsRefillAmount = "Settings.RefillAmount";
+            public const string SettingsSkinId = "Settings.SkinId";
+            public const string SettingsShopName = "Settings.ShopName";
             public const string ErrorCurrentlyBeingEdited = "Error.CurrentlyBeingEdited";
         }
 
@@ -4116,6 +4163,8 @@ namespace Oxide.Plugins
                 [Lang.SettingsRefillMax] = "Max Stock",
                 [Lang.SettingsRefillDelay] = "Seconds Between Refills",
                 [Lang.SettingsRefillAmount] = "Refill Amount",
+                [Lang.SettingsSkinId] = "Skin ID",
+                [Lang.SettingsShopName] = "Shop Name",
                 [Lang.ErrorCurrentlyBeingEdited] = "That vending machine is currently being edited by {0}.",
             }, this, "en");
         }

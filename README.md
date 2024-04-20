@@ -5,10 +5,11 @@
 ## Features
 
 - Allows customizing items sold at monument vending machines
-- Supports vanilla monuments, custom monuments, train tunnels, and underwater labs
+- Supports all monument types, including custom monuments
 - Saves customizations for future restarts and wipes, based on the vending machine's relative position to the monument
 - Synchronizes edits with copies of the vending machines at duplicate monuments
 - Compatible with NPC vending machines spawned at monuments by plugins such as [Monument Addons](https://umod.org/plugins/monument-addons)
+- Allows customizing vending machine skins
 - Allows disabling vending machine map markers
 - Allows disabling delivery drone access
 - Supports Economics and Server Rewards
@@ -31,14 +32,14 @@ When you open an NPC vending machine at a monument, if you have permission, you 
 - Change stock settings by editing the note next to each item
 - Toggle whether the map marker is enabled by clicking on the broadcast icon (green = on, gray = off)
 - Toggle whether delivery drones can access the vending machine by clicking on the drone icon (green = on, gray = off)
-- Change the shop name by clicking on the bottom-right note and editing its contents (supports multiple lines)
+- Change the vending machine skin and shop name by clicking on the bottom-right note and editing its contents
 - Save the changes by clicking the "SAVE" button
 
-### Drone marketplace limitations
+### Limitations regarding the map and drone marketplaces
 
-- Skin overlays are not visible while viewing vending machines from a drone marketplace 
-- Economics and Server Rewards currency cannot be used to purchase items from vending machines via drone marketplaces
-- When buying Economics or Server Rewards currency from a vending machine via a drone marketplace, the player will receive the currency immediately (the drone will travel but not transport any items)
+- Skin overlays are not visible while viewing vending machines on the map
+- Economics and Server Rewards currency cannot be used to purchase items via drone marketplaces
+- When selling items for Economics or Server Rewards currency via a drone marketplace, the player will receive the currency immediately (the drone will travel but not transport any items)
 
 ## Permissions
 
@@ -46,11 +47,11 @@ When you open an NPC vending machine at a monument, if you have permission, you 
 
 ## Screenshots
 
-![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/ShopView.png)
+![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/Images/ShopView.png)
 
-![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/ContainerViewStock.png)
+![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/Images/ContainerViewStock.png)
 
-![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/ContainerViewName.png)
+![](https://raw.githubusercontent.com/WheteThunger/CustomVendingSetup/master/Images/ContainerViewSettings.png)
 
 ## Configuration
 
