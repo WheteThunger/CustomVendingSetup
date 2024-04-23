@@ -18,6 +18,8 @@ using static VendingMachine;
 
 using CustomGetDataCallback = System.Func<Newtonsoft.Json.Linq.JObject>;
 using CustomSaveDataCallback = System.Action<Newtonsoft.Json.Linq.JObject>;
+using CustomGetSkinCallback = System.Func<ulong>;
+using CustomSetSkinCallback = System.Action<ulong>;
 
 namespace Oxide.Plugins
 {
@@ -2286,6 +2288,16 @@ namespace Oxide.Plugins
                     dataProvider.SaveDataCallback = saveDataCallback as CustomSaveDataCallback;
                 }
 
+                if (spec.TryGetValue("GetSkin", out var getSkinCallback))
+                {
+                    dataProvider.GetSkinCallback = getSkinCallback as CustomGetSkinCallback;
+                }
+
+                if (spec.TryGetValue("SetSkin", out var setSkinCallback))
+                {
+                    dataProvider.SetSkinCallback = setSkinCallback as CustomSetSkinCallback;
+                }
+
                 if (dataProvider.GetDataCallback == null)
                 {
                     LogError("Data provider missing GetData");
@@ -2304,19 +2316,41 @@ namespace Oxide.Plugins
             public Dictionary<string, object> Spec { get; private set; }
             public CustomGetDataCallback GetDataCallback;
             public CustomSaveDataCallback SaveDataCallback;
+            public CustomGetSkinCallback GetSkinCallback;
+            public CustomSetSkinCallback SetSkinCallback;
 
             private VendingProfile _vendingProfile;
 
             public VendingProfile GetData(Configuration config)
             {
                 _vendingProfile ??= GetDataCallback()?.ToObject<VendingProfile>();
-                return _vendingProfile?.Offers == null ? null : _vendingProfile;
+                if (_vendingProfile?.Offers == null)
+                    return null;
+
+                // DataProvider skin takes precedence if not 0.
+                if (GetSkinCallback?.Invoke() is { } skinId && skinId != 0)
+                {
+                    _vendingProfile.SkinId = skinId;
+                }
+
+                return _vendingProfile;
             }
 
             public void SaveData(VendingProfile vendingProfile)
             {
+                var jObject = vendingProfile != null ? JObject.FromObject(vendingProfile) : null;
+
+                if (vendingProfile != null && SetSkinCallback != null)
+                {
+                    // Inform the Data Provider about the updated skin.
+                    SetSkinCallback.Invoke(vendingProfile.SkinId == NpcVendingMachineSkinId ? 0 : vendingProfile.SkinId);
+
+                    // Remove the skin from the full payload, so the Data Provider has only one source of truth.
+                    jObject.Remove(VendingProfile.SkinIdField);
+                }
+
                 _vendingProfile = vendingProfile;
-                SaveDataCallback(vendingProfile != null ? JObject.FromObject(vendingProfile) : null);
+                SaveDataCallback(jObject);
             }
         }
 
@@ -2976,6 +3010,8 @@ namespace Oxide.Plugins
             private ulong _originalSkinId;
             private bool? _originalBroadcast;
 
+            private DataProvider _dataProvider => (_vendingController as CustomVendingController)?.DataProvider;
+
             public override void OnCreated()
             {
                 _vendingMachine = Host;
@@ -3263,11 +3299,19 @@ namespace Oxide.Plugins
                 InvokeRandomized(TimedRefill, 1, 1, 0.1f);
             }
 
+            private ulong GetOriginalSkin()
+            {
+                if (_dataProvider?.GetSkinCallback?.Invoke() is { } skinId)
+                    return skinId == 0 ? NpcVendingMachineSkinId : skinId;
+
+                return _originalSkinId;
+            }
+
             private void ResetToVanilla()
             {
                 CancelInvoke(TimedRefill);
 
-                _vendingMachine.skinID = _originalSkinId;
+                _vendingMachine.skinID = GetOriginalSkin();
 
                 if (_originalShopName != null)
                 {
@@ -3684,6 +3728,8 @@ namespace Oxide.Plugins
         [JsonObject(MemberSerialization.OptIn)]
         private class VendingProfile : IMonumentRelativePosition
         {
+            public const string SkinIdField = "SkinId";
+
             public static VendingProfile FromVendingMachine(NPCVendingMachine vendingMachine, MonumentRelativePosition location = null)
             {
                 return new VendingProfile
@@ -3697,7 +3743,7 @@ namespace Oxide.Plugins
                 };
             }
 
-            [JsonProperty("SkinId", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [JsonProperty(SkinIdField, DefaultValueHandling = DefaultValueHandling.Ignore)]
             [DefaultValue(NpcVendingMachineSkinId)]
             public ulong SkinId = NpcVendingMachineSkinId;
 
