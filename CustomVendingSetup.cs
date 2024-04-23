@@ -23,7 +23,7 @@ using CustomSetSkinCallback = System.Action<ulong>;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.11.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.11.1")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
