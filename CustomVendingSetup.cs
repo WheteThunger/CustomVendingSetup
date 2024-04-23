@@ -3743,12 +3743,12 @@ namespace Oxide.Plugins
                 };
             }
 
+            [JsonProperty("ShopName", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public string ShopName;
+
             [JsonProperty(SkinIdField, DefaultValueHandling = DefaultValueHandling.Ignore)]
             [DefaultValue(NpcVendingMachineSkinId)]
             public ulong SkinId = NpcVendingMachineSkinId;
-
-            [JsonProperty("ShopName", DefaultValueHandling = DefaultValueHandling.Ignore)]
-            public string ShopName;
 
             [JsonProperty("Broadcast", DefaultValueHandling = DefaultValueHandling.Ignore)]
             [DefaultValue(true)]
