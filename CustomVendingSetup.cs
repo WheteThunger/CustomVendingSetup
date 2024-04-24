@@ -451,19 +451,22 @@ namespace Oxide.Plugins
 
         #region API
 
-        private bool API_IsCustomized(NPCVendingMachine vendingMachine)
+        [HookMethod(nameof(API_IsCustomized))]
+        public object API_IsCustomized(NPCVendingMachine vendingMachine)
         {
-            return IsCustomized(vendingMachine);
+            return IsCustomized(vendingMachine) ? True : False;
         }
 
-        private void API_RefreshDataProvider(NPCVendingMachine vendingMachine)
+        [HookMethod(nameof(API_RefreshDataProvider))]
+        public void API_RefreshDataProvider(NPCVendingMachine vendingMachine)
         {
             _vendingMachineManager.HandleVendingMachineKilled(vendingMachine);
             _vendingMachineManager.HandleVendingMachineSpawned(vendingMachine);
         }
 
         // Undocumented. Intended for MonumentAddons migration to become a Data Provider.
-        private JObject API_MigrateVendingProfile(NPCVendingMachine vendingMachine)
+        [HookMethod(nameof(API_MigrateVendingProfile))]
+        public JObject API_MigrateVendingProfile(NPCVendingMachine vendingMachine)
         {
             var location = MonumentRelativePosition.FromVendingMachine(_monumentFinderAdapter, vendingMachine);
             if (location == null)
