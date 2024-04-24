@@ -19,13 +19,16 @@
 
 Note: Does not affect player vending machines.
 
-## Required plugins
+## Optional plugins
 
-- [Monument Finder](https://umod.org/plugins/monument-finder) -- Simply install. No configuration needed, except for custom monuments.
+- [Monument Finder](https://umod.org/plugins/monument-finder)
+  - Installing Monument Finder allows you to save vending machine customizations relative to monuments, automatically applying those customizations on different maps, as long as the vending machines don't move relative to the monuments (Facepunch might move them every few years when re-working a monument).
+  - No configuration needed, except for custom monuments.
+  - Without Monument Finder, vending machine customizations will apply to only the current map.
 
 ## How it works
 
-When you open an NPC vending machine at a monument, if you have permission, you will see an edit button. Clicking that edit button will reveal a container UI where you can customize the vending machine.
+When you open an NPC vending machine, if you have permission, you will see an edit button. Clicking that edit button will reveal a container UI where you can customize the vending machine.
 
 - Change which items are sold, and their prices, by adding and removing items from the container
 - Change display order by rearranging items in the container
@@ -40,6 +43,20 @@ When you open an NPC vending machine at a monument, if you have permission, you 
 - Skin overlays are not visible while viewing vending machines on the map
 - Economics and Server Rewards currency cannot be used to purchase items via drone marketplaces
 - When selling items for Economics or Server Rewards currency via a drone marketplace, the player will receive the currency immediately (the drone will travel but not transport any items)
+
+### Data providers
+
+When editing a vending machine, you will see some debug text that says "Data Provider: ..." which informs you of how your customizations will be saved and retrieved.
+- "Map" -- Indicates that the data is associated with this specific map and will not apply to other maps.
+  - The data will be saved at path `oxide/data/CustomVendingSetup/MAP_NAME.json`.
+- "Monument" -- Indicates that the data is associated with the nearest monument, as determined by Monument Finder.
+  - The data will be saved at path `oxide/data/CustomVendingSetup.json`.
+- "Plugin" -- Indicates that another plugin is hooking into Custom Vending Setup to handle saving and retrieving data for that specific vending machine. Typically this is done by plugins that spawn vending machines.
+  - The data could be saved anywhere, as it's decided by the plugin that is acting as the data provider.
+    - For Monument Addons, the data will be saved inside the profile that spawned the vending machine at `oxide/data/MonumentAddons/PROFILE_NAME.json`
+    - For Talking Npc Vendors, the data will be saved inside a vending machine profile at `oxide/data/TalkingNpc/VendingMachines/PROFILE_NAME.json`
+
+If you see "Map" while at a monument, then either you don't have Monument Finder installed, or you need to increase the bounds of the monument via the Monument Finder config to envelop the vending machine's position. Configuring monument bounds is important for custom monuments since there's no reliable way for a plugin to automatically know how large a custom monument is.
 
 ## Permissions
 
@@ -101,22 +118,6 @@ Example of overriding stack sizes:
 ```
 
 ## Localization
-
-```json
-{
-  "Button.Save": "SAVE",
-  "Button.Cancel": "CANCEL",
-  "Button.Edit": "EDIT",
-  "Button.Reset": "RESET",
-  "Info.ForSale": "FOR SALE",
-  "Info.Cost": "COST",
-  "Info.Settings": "SETTINGS",
-  "Settings.RefillMax": "Max Stock",
-  "Settings.RefillDelay": "Seconds Between Refills",
-  "Settings.RefillAmount": "Refill Amount",
-  "Error.CurrentlyBeingEdited": "That vending machine is currently being edited by {0}."
-}
-```
 
 ## FAQ
 
@@ -207,11 +208,13 @@ object OnCustomVendingSetup(NPCVendingMachine vendingMachine)
 Dictionary<string, object> OnCustomVendingSetupDataProvider(NPCVendingMachine vendingMachine)
 ```
 
-- Called when this plugin wants to internally register a vending machine, before checking if it's at a monument
+- Called when this plugin wants to internally register a vending machine, before associating it with a built-in map or monument data provider
 - Returning a valid dictionary will override where the plugin retrieves/saves data
 - Returning `null` will result in the default behavior
 
 The dictionary should contain the following keys.
+- `"Plugin"` -- Your plugin. Providing this allows administrators to see that your plugin is a data provider for a given vending machine.
+  - Type: `Oxide.Core.Plugins.Plugin`
 - `"GetData"` -- A method that Custom Vending Setup will call to retrieve data for this vending machine.
   - Type: `System.Func<JObject>`
 - `"SaveData"` -- A method that Custom Vending Setup will call to save data after the vending machine offers have been edited or reset.
@@ -241,6 +244,7 @@ Dictionary<string, object> OnCustomVendingSetupDataProvider(NPCVendingMachine ve
     {
         return new Dictionary<string, object>
         {
+            ["Plugin"] = this,
             ["GetData"] = new System.Func<JObject>(() =>
             {
                 return _pluginData.VendingProfile as JObject;
