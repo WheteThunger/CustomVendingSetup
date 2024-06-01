@@ -760,7 +760,7 @@ namespace Oxide.Plugins
             return player.inventory.loot.containers.FirstOrDefault()?.entityOwner == vendingMachine;
         }
 
-        private static bool AreVectorsClose(Vector3 a, Vector3 b, float xZTolerance = 0.001f, float yTolerance = 10)
+        private static bool AreVectorsClose(Vector3 a, Vector3 b, float xZTolerance = 0.01f, float yTolerance = 10)
         {
             // Allow a generous amount of vertical distance given that plugins may snap entities to terrain.
             return Math.Abs(a.y - b.y) < yTolerance
