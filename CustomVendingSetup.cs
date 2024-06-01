@@ -370,6 +370,8 @@ namespace Oxide.Plugins
             if (!IsCustomized(vendingMachine))
                 return null;
 
+            ExposedHooks.OnCustomVendingSetupGiveSoldItem(vendingMachine, item, player);
+
             // Simply give the item, without splitting it, since stack size logic has already been taken into account.
             player.GiveItem(item);
             return False;
@@ -677,6 +679,11 @@ namespace Oxide.Plugins
             public static void OnCustomVendingSetupTransactionWithCustomSettings(NPCVendingMachine vendingMachine, CaseInsensitiveDictionary<object> customSettings)
             {
                 Interface.CallHook("OnCustomVendingSetupTransactionWithCustomSettings", vendingMachine, customSettings);
+            }
+
+            public static void OnCustomVendingSetupGiveSoldItem(NPCVendingMachine vendingMachine, Item item, BasePlayer player)
+            {
+                Interface.CallHook("OnCustomVendingSetupGiveSoldItem", vendingMachine, item, player);
             }
         }
 

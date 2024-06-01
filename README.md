@@ -176,7 +176,7 @@ As a prerequisite, the custom monument must use the monument marker prefab and h
 
 #### API_IsCustomized
 
-```csharp
+```cs
 bool API_IsCustomized(NPCVendingMachine vendingMachine)
 ```
 
@@ -184,7 +184,7 @@ Returns `true` if the vending machine has been customized by this plugin, else `
 
 #### API_RefreshDataProvider
 
-```csharp
+```cs
 void API_RefreshDataProvider(NPCVendingMachine vendingMachine)
 ```
 
@@ -194,7 +194,7 @@ Removes the vending machine's currently assigned data provider and calls the `On
 
 #### OnCustomVendingSetup
 
-```csharp
+```cs
 object OnCustomVendingSetup(NPCVendingMachine vendingMachine)
 ```
 
@@ -202,9 +202,39 @@ object OnCustomVendingSetup(NPCVendingMachine vendingMachine)
 - Returning `false` will prevent the vending machine from being edited
 - Returning `null` will allow the vending machine to be edited
 
+#### OnCustomVendingSetupGiveSoldItem
+
+```cs
+void OnCustomVendingSetupGiveSoldItem(NPCVendingMachine vendingMachine, Item item, BasePlayer player)
+```
+
+- Called when this plugin is going to override the logic for giving an item to a player from a vending machine
+- This is useful for plugins that want to observe a player receiving an item from a vending machine, in conjunction with `OnNpcGiveSoldItem`, since using only `OnNpcGiveSoldItem` by itself can result in the item's `amount` being incorrect as that hook may be called on your plugin after Custom Vending Setup has given the item to a player which can merge the item with another item already in the player's inventory
+
+Example usage:
+```cs
+[PluginReference]
+Plugin CustomVendingSetup;
+
+void OnCustomVendingSetupGiveSoldItem(NPCVendingMachine vendingMachine, Item item, BasePlayer player)
+{
+    // Run some logic to count the purchase
+}
+
+void OnNpcGiveSoldItem(NPCVendingMachine vendingMachine, Item item, BasePlayer player)
+{
+    // Don't count the purchase if CustomVendingSetup is controlling the vending machine,
+    // since `OnCustomVendingSetupGiveSoldItem` will also be called in that case
+    if (CustomVendingSetup?.Call("API_IsCustomized", vendingMachine) is true)
+        return;
+
+    // Run some logic to count the purchase
+}
+```
+
 #### OnCustomVendingSetupDataProvider
 
-```csharp
+```cs
 Dictionary<string, object> OnCustomVendingSetupDataProvider(NPCVendingMachine vendingMachine)
 ```
 
