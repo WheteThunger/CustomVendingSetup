@@ -23,7 +23,7 @@ using CustomSetSkinCallback = System.Action<ulong>;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.12.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.12.1")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -1327,7 +1327,9 @@ namespace Oxide.Plugins
                 {
                     MapDataProvider => plugin.GetMessage(player, Lang.InfoDataProviderMap, SavedMapData.GetMapName()),
                     MonumentDataProvider monumentDataProvider => plugin.GetMessage(player, Lang.InfoDataProviderMonument, monumentDataProvider.Location.MonumentAdapter.ShortName),
-                    PluginDataProvider pluginDataProvider => plugin.GetMessage(player, Lang.InfoDataProviderPlugin, pluginDataProvider.Plugin.Name),
+                    PluginDataProvider pluginDataProvider => pluginDataProvider.Plugin != null
+                        ? plugin.GetMessage(player, Lang.InfoDataProviderPlugin, pluginDataProvider.Plugin.Name)
+                        : plugin.GetMessage(player, Lang.InfoDataProviderPluginUnknownName),
                     _ => "",
                 });
 
@@ -4310,6 +4312,7 @@ namespace Oxide.Plugins
             public const string InfoDataProviderMap = "Info.DataProvider.Map";
             public const string InfoDataProviderMonument = "Info.DataProvider.Monument";
             public const string InfoDataProviderPlugin = "Info.DataProvider.Plugin";
+            public const string InfoDataProviderPluginUnknownName = "Info.DataProvider.Plugin.UnknownName";
         }
 
         protected override void LoadDefaultMessages()
@@ -4332,6 +4335,7 @@ namespace Oxide.Plugins
                 [Lang.InfoDataProviderMap] = "Data Provider: <color=#f90>Map ({0})</color>",
                 [Lang.InfoDataProviderMonument] = "Data Provider: <color=#6f6>Monument ({0})</color>",
                 [Lang.InfoDataProviderPlugin] = "Data Provider: <color=#f9f>Plugin ({0})</color>",
+                [Lang.InfoDataProviderPluginUnknownName] = "Data Provider: <color=#f9f>Plugin</color>",
             }, this, "en");
         }
 
