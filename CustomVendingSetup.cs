@@ -1,4 +1,7 @@
-﻿using Newtonsoft.Json;
+﻿// #define DEBUG_READONLY
+
+using HarmonyLib;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Oxide.Core;
 using Oxide.Core.Plugins;
@@ -8,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Reflection.Emit;
 using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
 using Facepunch;
@@ -89,6 +93,48 @@ namespace Oxide.Plugins
             _paymentProviderResolver = new PaymentProviderResolver(this);
             _inaccessibleVendingMachines = new DynamicHookSubscriber<VendingController>(this, nameof(CanAccessVendingMachine));
             _playersNeedingFakeInventory = new DynamicHookSubscriber<BasePlayer>(this, nameof(OnEntitySaved), nameof(OnInventoryNetworkUpdate));
+        }
+
+        #endregion
+
+        #region Harmony Patches
+
+        [AutoPatch]
+        [HarmonyPatch(typeof(NPCVendingMachine), "CheckSalesDataLength")]
+        private static class CustomVendingSetupPatches
+        {
+            private static List<CodeInstruction> _expectedSequence = new()
+            {
+                new(OpCodes.Ldfld, AccessTools.Field(typeof(NPCVendingMachine), nameof(NPCVendingMachine.vendingOrders))),
+                new(OpCodes.Ldfld, AccessTools.Field(typeof(NPCVendingOrder), nameof(NPCVendingOrder.orders))),
+                new(OpCodes.Ldlen),
+            };
+
+            private static List<CodeInstruction> _replacementSequence = new()
+            {
+                new(OpCodes.Ldfld, AccessTools.Field(typeof(VendingMachine), nameof(VendingMachine.sellOrders))),
+                new(OpCodes.Ldfld, AccessTools.Field(typeof(SellOrderContainer), nameof(SellOrderContainer.sellOrders))),
+                new(OpCodes.Ldlen),
+            };
+
+            private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            {
+                var instructionArray = instructions.ToArray();
+                var newInstructions = HarmonyUtils.ReplaceSequence(instructionArray, _expectedSequence, _replacementSequence).ToArray();
+                newInstructions = HarmonyUtils.ReplaceSequence(newInstructions, _expectedSequence, _replacementSequence).ToArray();
+
+                #if DEBUG_READONLY
+                for (var i = 0; i < instructionArray.Length; i++)
+                {
+                    Interface.Oxide.LogDebug(HarmonyUtils.InstructionsMatch(instructionArray[i], newInstructions[i])
+                        ? $"[         ] {i.ToString(),2} : {instructionArray[i]}"
+                        : $"[ CHANGED ] {i.ToString(),2} : {instructionArray[i]}  -->>  {newInstructions[i]}");
+                }
+                return instructions;
+                #else
+                return newInstructions;
+                #endif
+            }
         }
 
         #endregion
@@ -276,7 +322,8 @@ namespace Oxide.Plugins
                 return False;
             }
 
-            var currencyAmount = offer.CurrencyItem.Amount * numberOfTransactions;
+            var sellOrder = vendingMachine.sellOrders.sellOrders[sellOrderIndex];
+            var currencyAmount = GetAdjustedPrice(offer, sellOrder) * numberOfTransactions;
             var currencyProvider = _paymentProviderResolver.Resolve(offer.CurrencyItem);
             if (currencyProvider.GetBalance(player) < currencyAmount)
             {
@@ -788,6 +835,11 @@ namespace Oxide.Plugins
                 vendingMachine.PlayerOpenLoot(player, vendingMachine.customerPanel);
                 Interface.CallHook(nameof(OnVendingShopOpened), vendingMachine, player);
             }
+        }
+
+        private static int GetAdjustedPrice(VendingOffer vendingOffer, SellOrder sellOrder)
+        {
+            return Mathf.Max(Mathf.RoundToInt(vendingOffer.CurrencyItem.Amount * sellOrder.priceMultiplier), 1);
         }
 
         private static VendingOffer[] GetOffersFromVendingMachine(NPCVendingMachine vendingMachine)
@@ -1825,6 +1877,60 @@ namespace Oxide.Plugins
             public static bool EqualsCaseInsensitive(string a, string b)
             {
                 return string.Compare(a, b, StringComparison.OrdinalIgnoreCase) == 0;
+            }
+        }
+
+        private static class SequenceUtils
+        {
+            public static int IndexOfSequence<TCollection, TItem>(TCollection haystack, TCollection needle, Func<TItem, TItem, bool> itemMatches)
+                where TCollection : IList<TItem>
+            {
+                if (needle.Count == 0)
+                    throw new InvalidOperationException($"{nameof(needle)} must be non-empty.");
+
+                for (var i = 0; i < haystack.Count - needle.Count + 1; i++)
+                {
+                    var sequenceMatches = true;
+
+                    for (var j = 0; j < needle.Count; j++)
+                    {
+                        if (!itemMatches(haystack[i + j], needle[j]))
+                        {
+                            sequenceMatches = false;
+                            break;
+                        }
+                    }
+
+                    if (sequenceMatches)
+                        return i;
+                }
+
+                return -1;
+            }
+        }
+
+        private static class HarmonyUtils
+        {
+            public static bool InstructionsMatch(CodeInstruction a, CodeInstruction b)
+            {
+                if (a.opcode != b.opcode)
+                    return false;
+
+                if (a.operand == null)
+                    return b.operand == null;
+
+                return a.operand.Equals(b.operand);
+            }
+
+            public static IEnumerable<CodeInstruction> ReplaceSequence(CodeInstruction[] instructions, List<CodeInstruction> expectedSequence, List<CodeInstruction> replacementSequence)
+            {
+                var indexOfSequence = SequenceUtils.IndexOfSequence<IList<CodeInstruction>, CodeInstruction>(instructions, expectedSequence, InstructionsMatch);
+                if (indexOfSequence == -1)
+                    return instructions;
+
+                return instructions[..indexOfSequence]
+                    .Concat(replacementSequence)
+                    .Concat(instructions[(indexOfSequence + expectedSequence.Count)..]);
             }
         }
 
