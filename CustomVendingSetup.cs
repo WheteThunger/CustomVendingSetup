@@ -27,7 +27,7 @@ using CustomSetSkinCallback = System.Action<ulong>;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.12.2")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.12.3")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -2110,18 +2110,18 @@ namespace Oxide.Plugins
 
             public int GetBalance(BasePlayer player)
             {
-                return Convert.ToInt32(_plugin.CallPlugin(_ownerPlugin, "Balance", player.userID));
+                return Convert.ToInt32(_plugin.CallPlugin(_ownerPlugin, "Balance", (ulong)player.userID));
             }
 
             public bool AddBalance(BasePlayer player, int amount, TransactionContext transaction)
             {
-                var result = _plugin.CallPlugin(_ownerPlugin, "Deposit", player.userID, Convert.ToDouble(amount));
+                var result = _plugin.CallPlugin(_ownerPlugin, "Deposit", (ulong)player.userID, Convert.ToDouble(amount));
                 return result is true;
             }
 
             public bool TakeBalance(BasePlayer player, int amount, List<Item> collect)
             {
-                var result = _plugin.CallPlugin(_ownerPlugin, "Withdraw", player.userID, Convert.ToDouble(amount));
+                var result = _plugin.CallPlugin(_ownerPlugin, "Withdraw", (ulong)player.userID, Convert.ToDouble(amount));
                 return result is true;
             }
         }
@@ -2140,18 +2140,18 @@ namespace Oxide.Plugins
 
             public int GetBalance(BasePlayer player)
             {
-                return Convert.ToInt32(_plugin.CallPlugin(_ownerPlugin, "CheckPoints", player.userID));
+                return Convert.ToInt32(_plugin.CallPlugin(_ownerPlugin, "CheckPoints", (ulong)player.userID));
             }
 
             public bool AddBalance(BasePlayer player, int amount, TransactionContext transaction)
             {
-                var result = _plugin.CallPlugin(_ownerPlugin, "AddPoints", player.userID, amount);
+                var result = _plugin.CallPlugin(_ownerPlugin, "AddPoints", (ulong)player.userID, amount);
                 return result is true;
             }
 
             public bool TakeBalance(BasePlayer player, int amount, List<Item> collect)
             {
-                var result = _plugin.CallPlugin(_ownerPlugin, "TakePoints", player.userID, amount);
+                var result = _plugin.CallPlugin(_ownerPlugin, "TakePoints", (ulong)player.userID, amount);
                 return result is true;
             }
         }
