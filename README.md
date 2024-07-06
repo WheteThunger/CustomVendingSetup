@@ -5,14 +5,16 @@
 ## Features
 
 - Allows customizing items sold at monument vending machines
+- Supports vendors that have invisible vending machines, such as those at bandit camp and fishing villages
 - Supports all monument types, including custom monuments
 - Saves customizations for future restarts and wipes, based on the vending machine's relative position to the monument
 - Synchronizes edits with copies of the vending machines at duplicate monuments
 - Compatible with NPC vending machines spawned at monuments by plugins such as [Monument Addons](https://umod.org/plugins/monument-addons)
+- Allows bypassing dynamic pricing per vending machine
 - Allows customizing vending machine skins
 - Allows disabling vending machine map markers
 - Allows disabling delivery drone access
-- Supports Economics and Server Rewards
+- Supports Economics and Server Rewards as both payment and merchandise
 - Supports blueprints, as well as items with custom skins and names
 - Supports attachments and other child items
 - Supports alternative ammo types and amounts
@@ -35,6 +37,7 @@ When you open an NPC vending machine, if you have permission, you will see an ed
 - Change stock settings by editing the note next to each item
 - Toggle whether the map marker is enabled by clicking on the broadcast icon (green = on, gray = off)
 - Toggle whether delivery drones can access the vending machine by clicking on the drone icon (green = on, gray = off)
+- Toggle whether the vending machine bypasses dynamic pricing by clicking on the bottom-right note and setting `Bypass Dynamic Pricing: True` or `Bypass Dynamic Pricing: False` (not applicable if the convar` npcvendingmachine.dynamicpricingenabled` is set to `false`)
 - Change the vending machine skin and shop name by clicking on the bottom-right note and editing its contents
 - Save the changes by clicking the "SAVE" button
 

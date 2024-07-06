@@ -994,6 +994,13 @@ namespace Oxide.Plugins
             if (generalSettingsItem != null)
             {
                 var settingsMap = new CaseInsensitiveDictionary<string>();
+
+                if (NPCVendingMachine.DynamicPricingEnabled)
+                {
+                    var dynamicPricingLabel = plugin.GetMessage(player, Lang.SettingsBypassDynamicPricing);
+                    settingsMap[dynamicPricingLabel] = vendingMachine.BypassDynamicPricing.ToString();
+                }
+
                 if (vendingMachine is not InvisibleVendingMachine)
                 {
                     var skinIdLabel = plugin.GetMessage(player, Lang.SettingsSkinId);
@@ -2920,6 +2927,16 @@ namespace Oxide.Plugins
                 {
                     var settingsDict = ParseSettings(generalSettingsText);
 
+                    if (NPCVendingMachine.DynamicPricingEnabled)
+                    {
+                        var dynamicPricingEnabledKey = _plugin.GetMessage(EditorPlayer, Lang.SettingsBypassDynamicPricing);
+                        if (settingsDict.TryGetValue(dynamicPricingEnabledKey, out var bypassDynamicPricingString)
+                            && bool.TryParse(bypassDynamicPricingString, out var bypassDynamicPricing))
+                        {
+                            profile.BypassDynamicPricing = bypassDynamicPricing;
+                        }
+                    }
+
                     if (_vendingMachine is not InvisibleVendingMachine)
                     {
                         var skinIdKey = _plugin.GetMessage(EditorPlayer, Lang.SettingsSkinId);
@@ -3205,6 +3222,7 @@ namespace Oxide.Plugins
 
             private string _originalShopName;
             private ulong _originalSkinId;
+            private bool _originalBypassDynamicPricing;
             private bool? _originalBroadcast;
 
             private IDataProvider _dataProvider => _vendingController.DataProvider;
@@ -3305,10 +3323,14 @@ namespace Oxide.Plugins
 
                 _vendingMachine.ClearSellOrders();
 
+                // Save original values.
+                _originalBypassDynamicPricing = _vendingMachine.BypassDynamicPricing;
                 _originalSkinId = _vendingMachine.skinID;
                 _originalShopName ??= _vendingMachine.shopName;
                 _originalBroadcast ??= _vendingMachine.IsBroadcasting();
 
+                // Apply profiles values.
+                _vendingMachine.BypassDynamicPricing = profile.BypassDynamicPricing;
                 _vendingMachine.skinID = profile.SkinId;
 
                 if (!string.IsNullOrEmpty(profile.ShopName))
@@ -3508,6 +3530,7 @@ namespace Oxide.Plugins
             {
                 CancelInvoke(TimedRefill);
 
+                _vendingMachine.BypassDynamicPricing = _originalBypassDynamicPricing;
                 _vendingMachine.skinID = GetOriginalSkin();
 
                 if (_originalShopName != null)
@@ -3943,6 +3966,9 @@ namespace Oxide.Plugins
             [JsonProperty(SkinIdField, DefaultValueHandling = DefaultValueHandling.Ignore)]
             [DefaultValue(NpcVendingMachineSkinId)]
             public ulong SkinId = NpcVendingMachineSkinId;
+
+            [JsonProperty("BypassDynamicPricing", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public bool BypassDynamicPricing;
 
             [JsonProperty("Broadcast", DefaultValueHandling = DefaultValueHandling.Ignore)]
             [DefaultValue(true)]
@@ -4413,6 +4439,7 @@ namespace Oxide.Plugins
             public const string SettingsRefillDelay = "Settings.RefillDelay";
             public const string SettingsRefillAmount = "Settings.RefillAmount";
             public const string SettingsSkinId = "Settings.SkinId";
+            public const string SettingsBypassDynamicPricing = "Settings.BypassDynamicPricing";
             public const string SettingsShopName = "Settings.ShopName";
             public const string ErrorCurrentlyBeingEdited = "Error.CurrentlyBeingEdited";
             public const string InfoDataProviderMap = "Info.DataProvider.Map";
@@ -4436,6 +4463,7 @@ namespace Oxide.Plugins
                 [Lang.SettingsRefillDelay] = "Seconds Between Refills",
                 [Lang.SettingsRefillAmount] = "Refill Amount",
                 [Lang.SettingsSkinId] = "Skin ID",
+                [Lang.SettingsBypassDynamicPricing] = "Bypass Dynamic Pricing",
                 [Lang.SettingsShopName] = "Shop Name",
                 [Lang.ErrorCurrentlyBeingEdited] = "That vending machine is currently being edited by {0}.",
                 [Lang.InfoDataProviderMap] = "Data Provider: <color=#f90>Map ({0})</color>",
