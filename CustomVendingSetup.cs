@@ -2032,7 +2032,6 @@ namespace Oxide.Plugins
             string GetMonumentPrefabName();
             string GetMonumentAlias();
             Vector3 GetPosition();
-            Vector3 GetLegacyPosition();
         }
 
         private static bool LocationsMatch<T1, T2>(T1 a, T2 b)
@@ -2045,8 +2044,7 @@ namespace Oxide.Plugins
             if (!monumentsMatch)
                 return false;
 
-            return AreVectorsClose(a.GetPosition(), b.GetPosition())
-                || AreVectorsClose(a.GetLegacyPosition(), b.GetLegacyPosition());
+            return AreVectorsClose(a.GetPosition(), b.GetPosition());
         }
 
         private struct MonumentRelativePosition : IMonumentRelativePosition
@@ -2061,19 +2059,16 @@ namespace Oxide.Plugins
                 {
                     MonumentAdapter = monument,
                     _position = monument.InverseTransformPoint(vendingMachine.transform.position),
-                    _legacyPosition = vendingMachine.transform.InverseTransformPoint(monument.Position),
                 };
             }
 
             public MonumentAdapter MonumentAdapter { get; private set; }
             private Vector3 _position;
-            private Vector3 _legacyPosition;
 
             // IMonumentRelativePosition members.
             public string GetMonumentPrefabName() => MonumentAdapter.PrefabName;
             public string GetMonumentAlias() => MonumentAdapter.Alias;
             public Vector3 GetPosition() => _position;
-            public Vector3 GetLegacyPosition() => _legacyPosition;
         }
 
         #endregion
@@ -3603,38 +3598,6 @@ namespace Oxide.Plugins
 
         #endregion
 
-        #region Legacy Saved Data
-
-        private class LegacyVendingItem
-        {
-            public string Shortname = string.Empty;
-            public string DisplayName = string.Empty;
-            public int Amount = 1;
-            public ulong Skin = 0;
-            public bool IsBlueprint = false;
-        }
-
-        private class LegacyVendingOffer
-        {
-            public LegacyVendingItem Currency = new();
-            public LegacyVendingItem SellItem = new();
-        }
-
-        private class LegacyVendingProfile
-        {
-            public string Id;
-            public List<LegacyVendingOffer> Offers = new();
-
-            public string Shortname;
-            public Vector3 WorldPosition;
-            public Vector3 RelativePosition;
-            public string RelativeMonument;
-
-            public bool DetectByShortname = false;
-        }
-
-        #endregion
-
         #region Saved Data
 
         private class CaseInsensitiveDictionary<TValue> : Dictionary<string, TValue>
@@ -4039,9 +4002,6 @@ namespace Oxide.Plugins
             [JsonProperty("Position", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public Vector3 Position;
 
-            [JsonProperty("LegacyPosition", DefaultValueHandling = DefaultValueHandling.Ignore)]
-            public Vector3 LegacyPosition;
-
             [JsonProperty("Offers")]
             public VendingOffer[] Offers;
 
@@ -4078,7 +4038,6 @@ namespace Oxide.Plugins
             public string GetMonumentPrefabName() => Monument;
             public string GetMonumentAlias() => MonumentAlias;
             public Vector3 GetPosition() => Position;
-            public Vector3 GetLegacyPosition() => LegacyPosition;
 
             [OnDeserialized]
             private void OnDeserialized(StreamingContext context)
@@ -4133,62 +4092,9 @@ namespace Oxide.Plugins
         [JsonObject(MemberSerialization.OptIn)]
         private class SavedMonumentData : BaseDataFile
         {
-            // Legacy data for v1.
-            [JsonProperty("Vendings", DefaultValueHandling = DefaultValueHandling.Ignore)]
-            public List<LegacyVendingProfile> Vendings;
-
             public static SavedMonumentData Load()
             {
-                var data = Interface.Oxide.DataFileSystem.ReadObject<SavedMonumentData>(nameof(CustomVendingSetup)) ?? new SavedMonumentData();
-
-                var dataMigrated = false;
-
-                if (data.Vendings != null)
-                {
-                    foreach (var legacyProfile in data.Vendings)
-                    {
-                        var profile = new VendingProfile
-                        {
-                            Monument = legacyProfile.RelativeMonument,
-                            LegacyPosition = legacyProfile.RelativePosition,
-                            Offers = new VendingOffer[legacyProfile.Offers.Count],
-                        };
-
-                        for (var i = 0; i < legacyProfile.Offers.Count; i++)
-                        {
-                            var legacyOffer = legacyProfile.Offers[i];
-
-                            profile.Offers[i] = new VendingOffer
-                            {
-                                SellItem = new VendingItem
-                                {
-                                    ShortName = legacyOffer.SellItem.Shortname,
-                                    DisplayName = !string.IsNullOrEmpty(legacyOffer.SellItem.DisplayName) ? legacyOffer.SellItem.DisplayName : null,
-                                    Amount = legacyOffer.SellItem.Amount,
-                                    SkinId = legacyOffer.SellItem.Skin,
-                                    IsBlueprint = legacyOffer.SellItem.IsBlueprint,
-                                },
-                                CurrencyItem = new VendingItem
-                                {
-                                    ShortName = legacyOffer.Currency.Shortname,
-                                    DisplayName = !string.IsNullOrEmpty(legacyOffer.Currency.DisplayName) ? legacyOffer.Currency.DisplayName : null,
-                                    Amount = legacyOffer.Currency.Amount,
-                                    SkinId = legacyOffer.Currency.Skin,
-                                    IsBlueprint = legacyOffer.Currency.IsBlueprint,
-                                },
-                            };
-                        }
-
-                        data.VendingProfiles.Add(profile);
-                    }
-
-                    dataMigrated = data.Vendings.Count > 0;
-                    data.Vendings = null;
-                    data.Save();
-                    LogWarning($"Migrated data file to new format.");
-                }
-
-                return data;
+                return Interface.Oxide.DataFileSystem.ReadObject<SavedMonumentData>(nameof(CustomVendingSetup)) ?? new SavedMonumentData();
             }
 
             public override void Save()
@@ -4201,16 +4107,7 @@ namespace Oxide.Plugins
                 foreach (var profile in VendingProfiles)
                 {
                     if (LocationsMatch(profile, location))
-                    {
-                        if (profile.LegacyPosition != Vector3.zero)
-                        {
-                            // Fix profile positioning.
-                            profile.Position = location.GetPosition();
-                            profile.LegacyPosition = Vector3.zero;
-                        }
-
                         return profile;
-                    }
                 }
 
                 return null;
