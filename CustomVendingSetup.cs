@@ -38,7 +38,7 @@ namespace Oxide.Plugins
         private readonly Plugin BagOfHolding, Economics, ItemRetriever, MonumentFinder, ServerRewards;
 
         private static CustomVendingSetup _instance;
-        private SavedMonumentData _monumentData;
+        private SavedPrefabRelativeData _prefabRelativeData;
         private SavedMapData _mapData;
         private Configuration _config;
 
@@ -194,7 +194,7 @@ namespace Oxide.Plugins
             _instance = this;
 
             _config.Init();
-            _monumentData = SavedMonumentData.Load();
+            _prefabRelativeData = SavedPrefabRelativeData.Load();
             _mapData = SavedMapData.Load();
 
             permission.RegisterPermission(PermissionUse, this);
@@ -569,13 +569,13 @@ namespace Oxide.Plugins
         [HookMethod(nameof(API_MigrateVendingProfile))]
         public JObject API_MigrateVendingProfile(NPCVendingMachine vendingMachine)
         {
-            if (MonumentRelativePosition.FromVendingMachine(_monumentFinderAdapter, vendingMachine) is not {} location)
+            if (PrefabRelativePosition.FromVendingMachine(_monumentFinderAdapter, vendingMachine) is not {} location)
             {
                 // This can happen if a vending machine was moved outside a monument's bounds.
                 return null;
             }
 
-            var vendingProfile = _monumentData.FindProfile(location);
+            var vendingProfile = _prefabRelativeData.FindProfile(location);
             if (vendingProfile == null)
             {
                 return null;
@@ -593,8 +593,8 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            _monumentData.VendingProfiles.Remove(vendingProfile);
-            _monumentData.Save();
+            _prefabRelativeData.VendingProfiles.Remove(vendingProfile);
+            _prefabRelativeData.Save();
 
             return jObject;
         }
@@ -889,6 +889,17 @@ namespace Oxide.Plugins
             }
         }
 
+        private static bool CanVendingMachineBeSkinned(NPCVendingMachine vendingMachine)
+        {
+            return vendingMachine is not InvisibleVendingMachine
+                && vendingMachine.GetParentEntity() is not TravellingVendor;
+        }
+
+        private static bool CanVendingMachineBroadcast(NPCVendingMachine vendingMachine)
+        {
+            return vendingMachine.GetParentEntity() is not TravellingVendor;
+        }
+
         private static int GetAdjustedPrice(VendingOffer vendingOffer, SellOrder sellOrder)
         {
             return Mathf.Max(Mathf.RoundToInt(vendingOffer.CurrencyItem.Amount * sellOrder.priceMultiplier), 1);
@@ -1053,7 +1064,7 @@ namespace Oxide.Plugins
                     settingsMap[dynamicPricingLabel] = vendingMachine.BypassDynamicPricing.ToString();
                 }
 
-                if (vendingMachine is not InvisibleVendingMachine)
+                if (CanVendingMachineBeSkinned(vendingMachine))
                 {
                     var skinIdLabel = plugin.GetMessage(player, Lang.SettingsSkinId);
                     settingsMap[skinIdLabel] = vendingMachine.skinID.ToString();
@@ -1431,13 +1442,17 @@ namespace Oxide.Plugins
                     UIConstants.CancelButtonColor,
                     UIConstants.CancelButtonTextColor
                 );
-                AddBroadcastButton(cuiElements, vendingMachine, uiState);
-                AddDroneButton(cuiElements, vendingMachine, uiState);
+
+                if (CanVendingMachineBroadcast(vendingMachine))
+                {
+                    AddBroadcastButton(cuiElements, vendingMachine, uiState);
+                    AddDroneButton(cuiElements, vendingMachine, uiState);
+                }
 
                 AddDataProviderInfo(cuiElements, controller.DataProvider switch
                 {
                     MapDataProvider => plugin.GetMessage(player, Lang.InfoDataProviderMap, SavedMapData.GetMapName()),
-                    MonumentDataProvider monumentDataProvider => plugin.GetMessage(player, Lang.InfoDataProviderMonument, monumentDataProvider.Location.MonumentAdapter.ShortName),
+                    PrefabRelativeDataProvider prefabRelativeDataProvider => plugin.GetMessage(player, prefabRelativeDataProvider.Location.GetDataProviderLabel(), prefabRelativeDataProvider.Location.GetShortName()),
                     PluginDataProvider pluginDataProvider => pluginDataProvider.Plugin != null
                         ? plugin.GetMessage(player, Lang.InfoDataProviderPlugin, pluginDataProvider.Plugin.Name)
                         : plugin.GetMessage(player, Lang.InfoDataProviderPluginUnknownName),
@@ -2027,47 +2042,84 @@ namespace Oxide.Plugins
             }
         }
 
-        private interface IMonumentRelativePosition
+        private interface IRelativePosition
         {
-            string GetMonumentPrefabName();
-            string GetMonumentAlias();
+            string GetPrefabName();
+            string GetPrefabAlias();
             Vector3 GetPosition();
         }
 
         private static bool LocationsMatch<T1, T2>(T1 a, T2 b)
-            where T1 : IMonumentRelativePosition
-            where T2 : IMonumentRelativePosition
+            where T1 : IRelativePosition
+            where T2 : IRelativePosition
         {
-            var monumentsMatch = a.GetMonumentAlias() != null && a.GetMonumentAlias() == b.GetMonumentAlias()
-                || a.GetMonumentPrefabName() == b.GetMonumentPrefabName();
+            var prefabsMatch = a.GetPrefabAlias() != null && a.GetPrefabAlias() == b.GetPrefabAlias()
+                || StringUtils.EqualsCaseInsensitive(a.GetPrefabName(), b.GetPrefabName());
 
-            if (!monumentsMatch)
+            if (!prefabsMatch)
                 return false;
 
             return AreVectorsClose(a.GetPosition(), b.GetPosition());
         }
 
-        private struct MonumentRelativePosition : IMonumentRelativePosition
+        private struct PrefabRelativePosition : IRelativePosition
         {
-            public static MonumentRelativePosition? FromVendingMachine(MonumentFinderAdapter monumentFinderAdapter, NPCVendingMachine vendingMachine)
+            public static PrefabRelativePosition? FromVendingMachine(MonumentFinderAdapter monumentFinderAdapter, NPCVendingMachine vendingMachine)
             {
+                var parentEntity = vendingMachine.GetParentEntity();
+                if (parentEntity != null)
+                {
+                    return new PrefabRelativePosition
+                    {
+                        _vendingMachine = vendingMachine,
+                        _parentEntity = parentEntity,
+                        _position = vendingMachine.transform.localPosition,
+                    };
+                }
+
                 var monument = monumentFinderAdapter.GetMonumentAdapter(vendingMachine);
                 if (monument == null)
                     return null;
 
-                return new MonumentRelativePosition
+                return new PrefabRelativePosition
                 {
-                    MonumentAdapter = monument,
+                    _vendingMachine = vendingMachine,
+                    _monumentAdapter = monument,
                     _position = monument.InverseTransformPoint(vendingMachine.transform.position),
                 };
             }
 
-            public MonumentAdapter MonumentAdapter { get; private set; }
+            private NPCVendingMachine _vendingMachine;
+            private BaseEntity _parentEntity;
+            private MonumentAdapter _monumentAdapter;
             private Vector3 _position;
 
-            // IMonumentRelativePosition members.
-            public string GetMonumentPrefabName() => MonumentAdapter.PrefabName;
-            public string GetMonumentAlias() => MonumentAdapter.Alias;
+            public string GetShortName()
+            {
+                return _monumentAdapter != null
+                    ? _monumentAdapter.ShortName
+                    : _parentEntity.ShortPrefabName;
+            }
+
+            public Vector3 GetCurrentPosition()
+            {
+                return _monumentAdapter?.InverseTransformPoint(_vendingMachine.transform.position)
+                       ?? _vendingMachine.transform.localPosition;
+            }
+
+            public string GetDataProviderLabel()
+            {
+                return _monumentAdapter != null
+                    ? Lang.InfoDataProviderMonument
+                    : Lang.InfoDataProviderEntity;
+            }
+
+            // IPrefabRelativePosition members.
+            public string GetPrefabName() => _monumentAdapter != null
+                ? _monumentAdapter.PrefabName
+                : _parentEntity.PrefabName;
+
+            public string GetPrefabAlias() => _monumentAdapter?.Alias;
             public Vector3 GetPosition() => _position;
         }
 
@@ -2527,12 +2579,12 @@ namespace Oxide.Plugins
             }
         }
 
-        private class MonumentDataProvider : DataFileDataProvider
+        private class PrefabRelativeDataProvider : DataFileDataProvider
         {
-            public MonumentRelativePosition Location;
+            public PrefabRelativePosition Location;
 
-            public MonumentDataProvider(SavedMonumentData monumentData, MonumentRelativePosition location, VendingProfile vendingProfile)
-                : base(monumentData, vendingProfile)
+            public PrefabRelativeDataProvider(SavedPrefabRelativeData prefabRelativeData, PrefabRelativePosition location, VendingProfile vendingProfile)
+                : base(prefabRelativeData, vendingProfile)
             {
                 Location = location;
             }
@@ -2542,9 +2594,9 @@ namespace Oxide.Plugins
                 if (vendingProfile == null)
                     return;
 
-                vendingProfile.Monument = Location.GetMonumentPrefabName();
-                vendingProfile.MonumentAlias = Location.GetMonumentAlias();
-                vendingProfile.Position = Location.MonumentAdapter.InverseTransformPoint(vendingMachine.transform.position);
+                vendingProfile.Monument = Location.GetPrefabName();
+                vendingProfile.MonumentAlias = Location.GetPrefabAlias();
+                vendingProfile.Position = Location.GetCurrentPosition();
             }
         }
 
@@ -2695,7 +2747,7 @@ namespace Oxide.Plugins
             private Dictionary<PluginDataProvider, VendingController> _controllersByPluginDataProvider = new();
 
             private MonumentFinderAdapter _monumentFinderAdapter => _plugin._monumentFinderAdapter;
-            private SavedMonumentData _monumentData => _plugin._monumentData;
+            private SavedPrefabRelativeData PrefabRelativeData => _plugin._prefabRelativeData;
             private SavedMapData _mapData => _plugin._mapData;
 
             public VendingMachineManager(CustomVendingSetup plugin, ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, PluginDataProviderRegistry dataProviderRegistry)
@@ -2763,14 +2815,14 @@ namespace Oxide.Plugins
                 }
             }
 
-            private VendingController FindMonumentController(MonumentRelativePosition location)
+            private VendingController FindPrefabRelativeController(PrefabRelativePosition location)
             {
                 foreach (var controller in _uniqueControllers)
                 {
-                    if (controller.DataProvider is not MonumentDataProvider monumentDataProvider)
+                    if (controller.DataProvider is not PrefabRelativeDataProvider relativeDataProvider)
                         continue;
 
-                    if (LocationsMatch(monumentDataProvider.Location, location))
+                    if (LocationsMatch(relativeDataProvider.Location, location))
                         return controller;
                 }
 
@@ -2814,9 +2866,9 @@ namespace Oxide.Plugins
                 }
             }
 
-            private VendingController CreateMonumentController(MonumentRelativePosition location)
+            private VendingController CreatePrefabRelativeController(PrefabRelativePosition location)
             {
-                return CreateController(new MonumentDataProvider(_monumentData, location, _monumentData.FindProfile(location)));
+                return CreateController(new PrefabRelativeDataProvider(PrefabRelativeData, location, PrefabRelativeData.FindProfile(location)));
             }
 
             private void HandleExistingController(NPCVendingMachine vendingMachine, VendingController controller)
@@ -2825,13 +2877,13 @@ namespace Oxide.Plugins
                 if (controller.DataProvider is not MapDataProvider || controller.DataProvider.GetData() != null)
                     return;
 
-                // Keep using the existing map controller and data provider if not at a monument.
-                if (MonumentRelativePosition.FromVendingMachine(_monumentFinderAdapter, vendingMachine) is not { } location)
+                // Keep using the existing map controller and data provider if not prefab-relative eligible.
+                if (PrefabRelativePosition.FromVendingMachine(_monumentFinderAdapter, vendingMachine) is not { } location)
                     return;
 
-                // Replace the map controller with a monument controller.
+                // Replace the map controller with a prefab-relative controller.
                 RemoveFromController(controller, vendingMachine);
-                AddToController(FindMonumentController(location) ?? CreateMonumentController(location), vendingMachine);
+                AddToController(FindPrefabRelativeController(location) ?? CreatePrefabRelativeController(location), vendingMachine);
             }
 
             private MapDataProvider CreateMapDataProvider(VendingProfile vendingProfile = null)
@@ -2861,16 +2913,16 @@ namespace Oxide.Plugins
                     return pluginController;
                 }
 
-                // Use a map data provider if map data exists for this vending machine, even if it's within a monument.
+                // Use a map data provider if map data exists for this vending machine.
                 var vendingProfile = _mapData.FindProfile(vendingMachine.transform.position);
                 if (vendingProfile != null)
                     return CreateController(CreateMapDataProvider(vendingProfile));
 
-                // Use a monument data provider if within a monument.
-                if (MonumentRelativePosition.FromVendingMachine(_monumentFinderAdapter, vendingMachine) is { } location)
-                    return FindMonumentController(location) ?? CreateMonumentController(location);
+                // Use a prefab-relative data provider if parented or within a monument.
+                if (PrefabRelativePosition.FromVendingMachine(_monumentFinderAdapter, vendingMachine) is { } location)
+                    return FindPrefabRelativeController(location) ?? CreatePrefabRelativeController(location);
 
-                // Use a map data provider if not within a monument.
+                // Use a map data provider if not prefab-relative eligible.
                 return CreateController(CreateMapDataProvider());
             }
         }
@@ -2984,7 +3036,7 @@ namespace Oxide.Plugins
                         }
                     }
 
-                    if (_vendingMachine is not InvisibleVendingMachine)
+                    if (CanVendingMachineBeSkinned(_vendingMachine))
                     {
                         var skinIdKey = _plugin.GetMessage(EditorPlayer, Lang.SettingsSkinId);
                         if (settingsDict.TryGetValue(skinIdKey, out var skinIdString)
@@ -3961,7 +4013,7 @@ namespace Oxide.Plugins
         }
 
         [JsonObject(MemberSerialization.OptIn)]
-        private class VendingProfile : IMonumentRelativePosition
+        private class VendingProfile : IRelativePosition
         {
             public const string SkinIdField = "SkinId";
 
@@ -4034,9 +4086,9 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            // IMonumentRelativePosition members.
-            public string GetMonumentPrefabName() => Monument;
-            public string GetMonumentAlias() => MonumentAlias;
+            // IPrefabRelativePosition members.
+            public string GetPrefabName() => Monument;
+            public string GetPrefabAlias() => MonumentAlias;
             public Vector3 GetPosition() => Position;
 
             [OnDeserialized]
@@ -4090,11 +4142,11 @@ namespace Oxide.Plugins
         }
 
         [JsonObject(MemberSerialization.OptIn)]
-        private class SavedMonumentData : BaseDataFile
+        private class SavedPrefabRelativeData : BaseDataFile
         {
-            public static SavedMonumentData Load()
+            public static SavedPrefabRelativeData Load()
             {
-                return Interface.Oxide.DataFileSystem.ReadObject<SavedMonumentData>(nameof(CustomVendingSetup)) ?? new SavedMonumentData();
+                return Interface.Oxide.DataFileSystem.ReadObject<SavedPrefabRelativeData>(nameof(CustomVendingSetup)) ?? new SavedPrefabRelativeData();
             }
 
             public override void Save()
@@ -4102,7 +4154,7 @@ namespace Oxide.Plugins
                 Interface.Oxide.DataFileSystem.WriteObject(nameof(CustomVendingSetup), this);
             }
 
-            public VendingProfile FindProfile<T>(T location) where T : IMonumentRelativePosition
+            public VendingProfile FindProfile<T>(T location) where T : IRelativePosition
             {
                 foreach (var profile in VendingProfiles)
                 {
@@ -4392,6 +4444,7 @@ namespace Oxide.Plugins
             public const string SettingsShopName = "Settings.ShopName";
             public const string ErrorCurrentlyBeingEdited = "Error.CurrentlyBeingEdited";
             public const string InfoDataProviderMap = "Info.DataProvider.Map";
+            public const string InfoDataProviderEntity = "Info.DataProvider.Entity";
             public const string InfoDataProviderMonument = "Info.DataProvider.Monument";
             public const string InfoDataProviderPlugin = "Info.DataProvider.Plugin";
             public const string InfoDataProviderPluginUnknownName = "Info.DataProvider.Plugin.UnknownName";
@@ -4416,6 +4469,7 @@ namespace Oxide.Plugins
                 [Lang.SettingsShopName] = "Shop Name",
                 [Lang.ErrorCurrentlyBeingEdited] = "That vending machine is currently being edited by {0}.",
                 [Lang.InfoDataProviderMap] = "Data Provider: <color=#f90>Map ({0})</color>",
+                [Lang.InfoDataProviderEntity] = "Data Provider: <color=#6f6>Entity ({0})</color>",
                 [Lang.InfoDataProviderMonument] = "Data Provider: <color=#6f6>Monument ({0})</color>",
                 [Lang.InfoDataProviderPlugin] = "Data Provider: <color=#f9f>Plugin ({0})</color>",
                 [Lang.InfoDataProviderPluginUnknownName] = "Data Provider: <color=#f9f>Plugin</color>",

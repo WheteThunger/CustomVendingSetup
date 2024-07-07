@@ -6,6 +6,7 @@
 
 - Allows customizing items sold at monument vending machines
 - Supports vendors that have invisible vending machines, such as those at bandit camp and fishing villages
+- Supports the travelling vendor
 - Supports all monument types, including custom monuments
 - Saves customizations for future restarts and wipes, based on the vending machine's relative position to the monument
 - Synchronizes edits with copies of the vending machines at duplicate monuments
@@ -47,14 +48,21 @@ When you open an NPC vending machine, if you have permission, you will see an ed
 - Economics and Server Rewards currency cannot be used to purchase items via drone marketplaces
 - When selling items for Economics or Server Rewards currency via a drone marketplace, the player will receive the currency immediately (the drone will travel but not transport any items)
 
+### Limitations regarding the travelling vendor
+
+- In vanilla Rust, the traveling vendor has slightly random items and prices every time it spawns, but this plugin does not currently offer such capabilities, so if you edit the travelling vendor, it will sell the same items for the same prices every time, even if you have multiple travelling vendors
+- The map marker and drone accessibility cannot be enabled
+
 ### Data providers
 
 When editing a vending machine, you will see some debug text that says "Data Provider: ..." which informs you of how your customizations will be saved and retrieved.
 - "Map" -- Indicates that the data is associated with this specific map and will not apply to other maps.
   - The data will be saved at path `oxide/data/CustomVendingSetup/MAP_NAME.json`.
+- "Entity" -- Indicates that the data is associated with the vending machine's parent entity. As of this writing, this applies to the travelling vendor.
+  - The data will be saved at path `oxide/data/CustomVendingSetup.json`.
 - "Monument" -- Indicates that the data is associated with the nearest monument, as determined by Monument Finder.
   - The data will be saved at path `oxide/data/CustomVendingSetup.json`.
-- "Plugin" -- Indicates that another plugin is hooking into Custom Vending Setup to handle saving and retrieving data for that specific vending machine. Typically this is done by plugins that spawn vending machines.
+- "Plugin" -- Indicates that another plugin is hooking into Custom Vending Setup to handle saving and retrieving data for that specific vending machine. Typically, this is done by plugins that spawn vending machines.
   - The data could be saved anywhere, as it's decided by the plugin that is acting as the data provider.
     - For Monument Addons, the data will be saved inside the profile that spawned the vending machine at `oxide/data/MonumentAddons/PROFILE_NAME.json`
     - For Talking Npc Vendors, the data will be saved inside a vending machine profile at `oxide/data/TalkingNpc/VendingMachines/PROFILE_NAME.json`
