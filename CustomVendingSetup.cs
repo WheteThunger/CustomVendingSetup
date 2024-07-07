@@ -11,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
@@ -36,6 +37,7 @@ namespace Oxide.Plugins
         [PluginReference]
         private readonly Plugin BagOfHolding, Economics, ItemRetriever, MonumentFinder, ServerRewards;
 
+        private static CustomVendingSetup _instance;
         private SavedMonumentData _monumentData;
         private SavedMapData _mapData;
         private Configuration _config;
@@ -101,7 +103,7 @@ namespace Oxide.Plugins
 
         [AutoPatch]
         [HarmonyPatch(typeof(NPCVendingMachine), "CheckSalesDataLength")]
-        private static class CustomVendingSetupPatches
+        private static class Patch_NPCVendingMachine_CheckSalesDataLength
         {
             private static List<CodeInstruction> _expectedSequence = new()
             {
@@ -137,12 +139,60 @@ namespace Oxide.Plugins
             }
         }
 
+        [AutoPatch]
+        [HarmonyPatch(typeof(TravellingVendor), nameof(TravellingVendor.SV_OpenMenu))]
+        private static class Patch_TravellingVendor_OpenMenu
+        {
+            private static readonly CodeInstruction OnVendingShopOpenedInstruction = new(OpCodes.Ldstr, "OnVendingShopOpened");
+
+            private static readonly MethodInfo _openMenuReplacementMethod = typeof(Patch_TravellingVendor_OpenMenu)
+                .GetMethod(nameof(OpenMenuReplacement), BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+
+            private static readonly FieldInfo TravelingVendorVendingMachineField = typeof(TravellingVendor)
+                .GetField("vendingMachine", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            private static readonly CodeInstruction[] _newInstructions =
+            {
+                new(OpCodes.Ldarg_0),
+                new(OpCodes.Ldarg_1),
+                new(OpCodes.Call, _openMenuReplacementMethod),
+                new(OpCodes.Ret),
+            };
+
+            private static void OpenMenuReplacement(TravellingVendor travelingVendor, BaseEntity.RPCMessage message)
+            {
+                var vendingMachine = (NPCVendingMachine)TravelingVendorVendingMachineField.GetValue(travelingVendor);
+                if (vendingMachine == null)
+                {
+                    vendingMachine = travelingVendor.GetComponentInChildren<NPCVendingMachine>();
+                    TravelingVendorVendingMachineField.SetValue(travelingVendor, vendingMachine);
+                }
+
+                vendingMachine.OpenShop(message.player);
+
+                if (_instance is { IsLoaded: true })
+                {
+                    _instance.Call(nameof(OnVendingShopOpened), vendingMachine, message.player);
+                }
+            }
+
+            private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            {
+                if (instructions.Any(instruction => HarmonyUtils.InstructionsMatch(instruction, OnVendingShopOpenedInstruction)))
+                    return instructions;
+
+                return _newInstructions;
+            }
+        }
+
         #endregion
 
         #region Hooks
 
         private void Init()
         {
+            _instance = this;
+
             _config.Init();
             _monumentData = SavedMonumentData.Load();
             _mapData = SavedMapData.Load();
@@ -201,6 +251,8 @@ namespace Oxide.Plugins
             ObjectCache.Clear<int>();
             ObjectCache.Clear<float>();
             ObjectCache.Clear<ulong>();
+
+            _instance = null;
         }
 
         private void OnPluginLoaded(Plugin plugin)
