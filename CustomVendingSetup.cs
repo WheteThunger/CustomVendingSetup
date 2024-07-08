@@ -425,6 +425,8 @@ namespace Oxide.Plugins
                 OnMarketplaceItemPurchase = onMarketplaceItemPurchase,
             });
 
+            vendingMachine.RecordSale(sellOrderIndex, sellAmount);
+
             // These can now be unset since the "CanVendingStockRefill" hook can no longer be called after this point.
             _performingInstantRestock = false;
             _itemBeingSold = null;
