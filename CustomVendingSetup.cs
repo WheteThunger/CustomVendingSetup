@@ -195,7 +195,6 @@ namespace Oxide.Plugins
 
             _config.Init();
             _prefabRelativeData = SavedPrefabRelativeData.Load();
-            _mapData = SavedMapData.Load();
 
             permission.RegisterPermission(PermissionUse, this);
 
@@ -208,6 +207,7 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             _isServerInitialized = true;
+            _mapData = SavedMapData.Load();
 
             if (MonumentFinder == null)
             {
