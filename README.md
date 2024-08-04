@@ -146,6 +146,8 @@ Alternatively, you can change restock speed per item, per vending machine by cha
 
 The number of items you can purchase at once is determined by the vending machine's stock. By default, vending machines stock enough merchandise for 10 purchases, though more may be stocked in some cases (see below for that question). You can change the max stock per item, per vending machine by changing the "Max Stock" value in the corresponding item's note.
 
+Note that some items, especially items that have a condition bar, cannot be purchased in bulk due to client-side limitations. Plugins cannot easily solve this limitation. As a workaround, you can create multiple listings for the same item (e.g., 1 drone for 10 scrap, 10 drones for 100 scrap, 100 drones for 1000 scrap).
+
 #### Why do some items show more stock than configured?
 
 This can happen for vending machines that sell an item for multiple amounts (e.g., scrap to **wood**, and stones to **wood**). This happens because each vending machine uses a single stock container for all items it sells, so it will try to stock the amount required for whichever sale offer requires the most stock.
