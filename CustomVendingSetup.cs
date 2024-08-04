@@ -10,9 +10,11 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
 using Facepunch;
+using ProtoBuf;
 using UnityEngine;
 using VLB;
 using static ProtoBuf.VendingMachine;
@@ -36,6 +38,7 @@ namespace Oxide.Plugins
 
         private SavedPrefabRelativeData _prefabRelativeData;
         private SavedMapData _mapData;
+        private SavedSalesData _salesData;
         private Configuration _config;
 
         private const string PermissionUse = "customvendingsetup.use";
@@ -101,6 +104,7 @@ namespace Oxide.Plugins
         {
             _config.Init();
             _prefabRelativeData = SavedPrefabRelativeData.Load();
+            _salesData = SavedSalesData.Load();
 
             permission.RegisterPermission(PermissionUse, this);
 
@@ -153,10 +157,31 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
+            if (NPCVendingMachine.DynamicPricingEnabled)
+            {
+                _vendingMachineManager.SaveAllSalesData();
+            }
+
             _vendingMachineManager.ResetAll();
             ObjectCache.Clear<int>();
             ObjectCache.Clear<float>();
             ObjectCache.Clear<ulong>();
+        }
+
+        private void OnNewSave()
+        {
+            if (NPCVendingMachine.DynamicPricingEnabled)
+            {
+                _salesData.Reset();
+            }
+        }
+
+        private void OnServerSave()
+        {
+            if (NPCVendingMachine.DynamicPricingEnabled)
+            {
+                _vendingMachineManager.SaveAllSalesData();
+            }
         }
 
         private void OnPluginLoaded(Plugin plugin)
@@ -2392,6 +2417,118 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region Data Utils
+
+        private interface IDataLoader
+        {
+            bool Exists(string filename);
+            T Load<T>(string filename) where T : new();
+            void Save<T>(string filename, T data);
+        }
+
+        private class ProtoLoader : IDataLoader
+        {
+            public bool Exists(string filename)
+            {
+                return ProtoStorage.Exists(filename);
+            }
+
+            public T Load<T>(string filename) where T : new()
+            {
+                if (Exists(filename))
+                    return ProtoStorage.Load<T>(filename) ?? new T();
+
+                return new T();
+            }
+
+            public void Save<T>(string filename, T data)
+            {
+                ProtoStorage.Save(data, filename);
+            }
+        }
+
+        private class JsonLoader : IDataLoader
+        {
+            public bool Exists(string filename)
+            {
+                return Interface.Oxide.DataFileSystem.ExistsDatafile(filename);
+            }
+
+            public T Load<T>(string filename) where T : new()
+            {
+                if (Exists(filename))
+                    return Interface.Oxide.DataFileSystem.ReadObject<T>(filename) ?? new T();
+
+                return new T();
+            }
+
+            public void Save<T>(string filename, T data)
+            {
+                Interface.Oxide.DataFileSystem.WriteObject(filename, data);
+            }
+        }
+
+        private interface IDataLoader<T> where T : new()
+        {
+            bool Exists();
+            T Load();
+            void Save(T data);
+        }
+
+        private class ProtoLoader<T> : IDataLoader<T> where T : new()
+        {
+            private readonly ProtoLoader _protoLoader = new();
+            private readonly string _filename = null;
+
+            public ProtoLoader(string filename)
+            {
+                _filename = filename;
+            }
+
+            public bool Exists()
+            {
+                return _protoLoader.Exists(_filename);
+            }
+
+            public T Load()
+            {
+                return _protoLoader.Load<T>(_filename);
+            }
+
+            public void Save(T data)
+            {
+                _protoLoader.Save(_filename, data);
+            }
+        }
+
+        private class JsonLoader<T> : IDataLoader<T> where T : new()
+        {
+            private readonly JsonLoader _jsonLoader = new();
+            private readonly string _filename = null;
+
+            public JsonLoader(string filename)
+            {
+                _filename = filename;
+            }
+
+            public bool Exists()
+            {
+                return _jsonLoader.Exists(_filename);
+            }
+
+            public T Load()
+            {
+                return _jsonLoader.Load<T>(_filename);
+            }
+
+            public void Save(T data)
+            {
+                _jsonLoader.Save(_filename, data);
+            }
+        }
+
+        #endregion
+
         #region Data Provider
 
         private interface IDataProvider
@@ -2402,12 +2539,12 @@ namespace Oxide.Plugins
 
         private abstract class DataFileDataProvider : IDataProvider
         {
-            private BaseDataFile _dataFile;
+            private BaseVendingProfileDataFile _dataFile;
             private VendingProfile _vendingProfile;
 
             protected abstract void BeforeSave(VendingProfile vendingProfile, NPCVendingMachine vendingMachine);
 
-            protected DataFileDataProvider(BaseDataFile dataFile, VendingProfile vendingProfile)
+            protected DataFileDataProvider(BaseVendingProfileDataFile dataFile, VendingProfile vendingProfile)
             {
                 _dataFile = dataFile;
                 _vendingProfile = vendingProfile;
@@ -2609,6 +2746,7 @@ namespace Oxide.Plugins
             private MonumentFinderAdapter _monumentFinderAdapter => _plugin._monumentFinderAdapter;
             private SavedPrefabRelativeData PrefabRelativeData => _plugin._prefabRelativeData;
             private SavedMapData _mapData => _plugin._mapData;
+            private SavedSalesData _salesData => _plugin._salesData;
 
             public VendingMachineManager(CustomVendingSetup plugin, ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, PluginDataProviderRegistry dataProviderRegistry)
             {
@@ -2679,6 +2817,29 @@ namespace Oxide.Plugins
                 {
                     controller.Destroy();
                 }
+            }
+
+            public void SaveAllSalesData()
+            {
+                _salesData.VendingMachines.Clear();
+
+                foreach (var controller in _uniqueControllers)
+                {
+                    // Only save vending machines which are customized.
+                    if (controller.Profile?.Offers == null)
+                        continue;
+
+                    foreach (var vendingMachine in controller.VendingMachineList)
+                    {
+                        // Only save vending machines which have dynamic pricing enabled.
+                        if (vendingMachine.BypassDynamicPricing)
+                            continue;
+
+                        _salesData.VendingMachines.Add(VendingMachineState.FromVendingMachine(vendingMachine));
+                    }
+                }
+
+                _salesData.Save();
             }
 
             private VendingController FindPrefabRelativeController(PrefabRelativePosition location)
@@ -2972,12 +3133,12 @@ namespace Oxide.Plugins
             // While the EditController is non-null, a player is editing the vending machine.
             public EditController EditController { get; protected set; }
 
-            public bool HasVendingMachines => _vendingMachineList.Count > 0;
+            public bool HasVendingMachines => VendingMachineList.Count > 0;
 
             protected CustomVendingSetup _plugin;
 
             // List of vending machines with a position matching this controller.
-            private HashSet<NPCVendingMachine> _vendingMachineList = new();
+            public HashSet<NPCVendingMachine> VendingMachineList = new();
 
             private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
 
@@ -3032,7 +3193,7 @@ namespace Oxide.Plugins
 
             public void AddVendingMachine(NPCVendingMachine vendingMachine)
             {
-                if (!_vendingMachineList.Add(vendingMachine))
+                if (!VendingMachineList.Add(vendingMachine))
                     return;
 
                 var component = _componentFactory.GetOrAddTo(vendingMachine);
@@ -3042,10 +3203,10 @@ namespace Oxide.Plugins
 
             public void RemoveVendingMachine(NPCVendingMachine vendingMachine)
             {
-                if (!_vendingMachineList.Remove(vendingMachine))
+                if (!VendingMachineList.Remove(vendingMachine))
                     return;
 
-                if (_vendingMachineList.Count == 0)
+                if (VendingMachineList.Count == 0)
                 {
                     EditController?.Kill();
                     _plugin._inaccessibleVendingMachines.Remove(this);
@@ -3079,7 +3240,7 @@ namespace Oxide.Plugins
 
             private void SetupVendingMachines()
             {
-                foreach (var vendingMachine in _vendingMachineList)
+                foreach (var vendingMachine in VendingMachineList)
                 {
                     _componentFactory.GetOrAddTo(vendingMachine).SetProfile(Profile);
                 }
@@ -3087,7 +3248,7 @@ namespace Oxide.Plugins
 
             private void ResetVendingMachines()
             {
-                foreach (var vendingMachine in _vendingMachineList)
+                foreach (var vendingMachine in VendingMachineList)
                 {
                     VendingMachineComponent.RemoveFromVendingMachine(vendingMachine);
                 }
@@ -3331,6 +3492,8 @@ namespace Oxide.Plugins
                 }
 
                 CustomRefill(maxRefill: true);
+
+                Plugin._salesData.FindState(_vendingMachine)?.ApplyToVendingMachine(_vendingMachine);
             }
 
             private void ScheduleRefill(int offerIndex, VendingOffer offer, int min = 0)
@@ -3999,7 +4162,7 @@ namespace Oxide.Plugins
         }
 
         [JsonObject(MemberSerialization.OptIn)]
-        private abstract class BaseDataFile
+        private abstract class BaseVendingProfileDataFile
         {
             [JsonProperty("VendingProfiles")]
             public List<VendingProfile> VendingProfiles { get; } = new();
@@ -4008,16 +4171,18 @@ namespace Oxide.Plugins
         }
 
         [JsonObject(MemberSerialization.OptIn)]
-        private class SavedPrefabRelativeData : BaseDataFile
+        private class SavedPrefabRelativeData : BaseVendingProfileDataFile
         {
+            private static IDataLoader<SavedPrefabRelativeData> _dataLoader = new JsonLoader<SavedPrefabRelativeData>(nameof(CustomVendingSetup));
+
             public static SavedPrefabRelativeData Load()
             {
-                return Interface.Oxide.DataFileSystem.ReadObject<SavedPrefabRelativeData>(nameof(CustomVendingSetup)) ?? new SavedPrefabRelativeData();
+                return _dataLoader.Load();
             }
 
             public override void Save()
             {
-                Interface.Oxide.DataFileSystem.WriteObject(nameof(CustomVendingSetup), this);
+                _dataLoader.Save(this);
             }
 
             public VendingProfile FindProfile<T>(T location) where T : IRelativePosition
@@ -4033,8 +4198,10 @@ namespace Oxide.Plugins
         }
 
         [JsonObject(MemberSerialization.OptIn)]
-        private class SavedMapData : BaseDataFile
+        private class SavedMapData : BaseVendingProfileDataFile
         {
+            private static IDataLoader _dataLoader = new JsonLoader();
+
             // Return example: proceduralmap.1500.548423.212
             private static string GetPerWipeSaveName()
             {
@@ -4057,17 +4224,12 @@ namespace Oxide.Plugins
 
             public static SavedMapData Load()
             {
-                var filepath = GetFilepath();
-
-                if (Interface.Oxide.DataFileSystem.ExistsDatafile(filepath))
-                    return Interface.Oxide.DataFileSystem.ReadObject<SavedMapData>(filepath) ?? new SavedMapData();
-
-                return new SavedMapData();
+                return _dataLoader.Load<SavedMapData>(GetFilepath());
             }
 
             public override void Save()
             {
-                Interface.Oxide.DataFileSystem.WriteObject(GetFilepath(), this);
+                _dataLoader.Save(GetFilepath(), this);
             }
 
             public VendingProfile FindProfile(Vector3 position)
@@ -4076,6 +4238,132 @@ namespace Oxide.Plugins
                 {
                     if (AreVectorsClose(vendingProfile.Position, position))
                         return vendingProfile;
+                }
+
+                return null;
+            }
+        }
+
+        [ProtoContract]
+        [JsonObject(MemberSerialization.OptIn)]
+        private class CustomSalesData
+        {
+            public static CustomSalesData FromVendingMachineSalesData(NPCVendingMachine.SalesData salesData)
+            {
+                return new CustomSalesData
+                {
+                    CurrentMultiplier = salesData.CurrentMultiplier,
+                    SoldThisInterval = salesData.SoldThisInterval,
+                    TotalIntervals = salesData.TotalIntervals,
+                    TotalSales = salesData.TotalSales,
+                };
+            }
+
+            [ProtoMember(1)]
+            [JsonProperty("CurrentMultiplier")]
+            public float CurrentMultiplier;
+
+            [ProtoMember(2)]
+            [JsonProperty("SoldThisInterval")]
+            public ulong SoldThisInterval;
+
+            [ProtoMember(3)]
+            [JsonProperty("TotalIntervals")]
+            public ulong TotalIntervals;
+
+            [ProtoMember(4)]
+            [JsonProperty("TotalSales")]
+            public ulong TotalSales;
+
+            public NPCVendingMachine.SalesData ToVendingMachineSalesData()
+            {
+                var vendingMachineSalesData = new NPCVendingMachine.SalesData();
+                CopyToVendingMachineSalesData(vendingMachineSalesData);
+                return vendingMachineSalesData;
+            }
+
+            public void CopyToVendingMachineSalesData(NPCVendingMachine.SalesData salesData)
+            {
+                salesData.CurrentMultiplier = CurrentMultiplier;
+                salesData.SoldThisInterval = SoldThisInterval;
+                salesData.TotalIntervals = TotalIntervals;
+                salesData.TotalSales = TotalSales;
+            }
+        }
+
+        [ProtoContract]
+        [JsonObject(MemberSerialization.OptIn)]
+        private class VendingMachineState
+        {
+            private static readonly FieldInfo AllSalesDataField = typeof(NPCVendingMachine)
+                .GetField("allSalesData", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            public static VendingMachineState FromVendingMachine(NPCVendingMachine vendingMachine)
+            {
+                var salesData = (NPCVendingMachine.SalesData[])AllSalesDataField?.GetValue(vendingMachine)
+                                ?? Array.Empty<NPCVendingMachine.SalesData>();
+
+                return new VendingMachineState
+                {
+                    EntityId = vendingMachine.net.ID.Value,
+                    SalesData = salesData.Select(CustomSalesData.FromVendingMachineSalesData).ToArray(),
+                };
+            }
+
+            [ProtoMember(1)]
+            [JsonProperty("EntityId")]
+            public ulong EntityId;
+
+            [ProtoMember(2)]
+            [JsonProperty("SalesData")]
+            public CustomSalesData[] SalesData = Array.Empty<CustomSalesData>();
+
+            public void ApplyToVendingMachine(NPCVendingMachine vendingMachine)
+            {
+                var salesData = SalesData?.Select(data => data.ToVendingMachineSalesData())
+                        .Take(vendingMachine.sellOrders.sellOrders.Count)
+                        .ToArray() ?? Array.Empty<NPCVendingMachine.SalesData>();
+
+                AllSalesDataField?.SetValue(vendingMachine, salesData);
+            }
+        }
+
+        [ProtoContract]
+        [JsonObject(MemberSerialization.OptIn)]
+        private class SavedSalesData
+        {
+            private static string FileName = $"{nameof(CustomVendingSetup)}_SalesData";
+            private static IDataLoader<SavedSalesData> DataLoader = new ProtoLoader<SavedSalesData>(FileName);
+
+            public static SavedSalesData Load()
+            {
+                return DataLoader.Load();
+            }
+
+            [ProtoMember(1)]
+            [JsonProperty("VendingMachines")]
+            public List<VendingMachineState> VendingMachines = new();
+
+            public void Save()
+            {
+                DataLoader.Save(this);
+            }
+
+            public void Reset()
+            {
+                if (VendingMachines.Count == 0)
+                    return;
+
+                VendingMachines.Clear();
+                Save();
+            }
+
+            public VendingMachineState FindState(NPCVendingMachine vendingMachine)
+            {
+                foreach (var vendingMachineState in VendingMachines)
+                {
+                    if (vendingMachineState.EntityId == vendingMachine.net.ID.Value)
+                        return vendingMachineState;
                 }
 
                 return null;
