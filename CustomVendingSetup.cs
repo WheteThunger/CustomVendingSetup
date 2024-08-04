@@ -554,6 +554,8 @@ namespace Oxide.Plugins
 
         #region API
 
+
+
         [HookMethod(nameof(API_IsCustomized))]
         public object API_IsCustomized(NPCVendingMachine vendingMachine)
         {
@@ -563,8 +565,7 @@ namespace Oxide.Plugins
         [HookMethod(nameof(API_RefreshDataProvider))]
         public void API_RefreshDataProvider(NPCVendingMachine vendingMachine)
         {
-            _vendingMachineManager.HandleVendingMachineKilled(vendingMachine);
-            _vendingMachineManager.HandleVendingMachineSpawned(vendingMachine);
+            _vendingMachineManager.RefreshDataProvider(vendingMachine);
         }
 
         // Undocumented. Intended for MonumentAddons migration to become a Data Provider.
@@ -829,6 +830,13 @@ namespace Oxide.Plugins
 
                 case UICommands.Reset:
                     vendingController.HandleReset();
+
+                    // Allow Map data provider to be replaced with a Monument data provider.
+                    if (vendingController.DataProvider is MapDataProvider)
+                    {
+                        _vendingMachineManager.RefreshDataProvider(vendingMachine);
+                    }
+
                     vendingMachine.FullUpdate();
                     basePlayer.EndLooting();
                     basePlayer.inventory.loot.SendImmediate();
@@ -2788,6 +2796,12 @@ namespace Oxide.Plugins
                     return;
 
                 RemoveFromController(controller, vendingMachine);
+            }
+
+            public void RefreshDataProvider(NPCVendingMachine vendingMachine)
+            {
+                HandleVendingMachineKilled(vendingMachine);
+                HandleVendingMachineSpawned(vendingMachine);
             }
 
             public VendingController GetController(NPCVendingMachine vendingMachine)
