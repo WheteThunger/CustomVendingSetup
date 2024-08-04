@@ -181,7 +181,16 @@ There is currently no way to display custom item names, but this feature is plan
 
 #### How do I setup custom monuments?
 
-As a prerequisite, the custom monument must use the monument marker prefab and have a unique name. Then, you must configure the monument's bounds in [Monument Finder](https://umod.org/plugins/monument-finder) to envelope the monument so that Custom Vending Setup can accurately determine whether a given vending machine is within that monument. Please see the Monument Finder plugin documentation for further guidance.
+If you are using a map with custom monuments, first ask yourself, are you going to use the custom monuments on other maps?
+
+- If the answer is **no**, you don't need Monument Finder, and you can simply use the Map data provider feature of this plugin.
+- If the answer is **yes**, you should install Monument Finder and configure custom bounds. Continue reading below.
+
+In order for Custom Vending Setup to know which monument to save vending machine customizations relative to, it needs to be aware of the location and size of all monuments. Custom Vending Setup delegates this responsibility to the [Monument Finder](https://umod.org/plugins/monument-finder) plugin. Monument Finder has hard-coded bounds for most vanilla monuments, but for custom monuments, you will most likely have to configure it as there is no reliable way for it to guess the location and size of custom monuments. Please see the section titled [How to set up custom monuments](https://umod.org/plugins/monument-finder#how-to-set-up-custom-monuments) in the Monument Finder documentation.
+
+Once you have configured the custom monument via Monument Finder, interact with the vending machine and click the Edit button to confirm that the vending machine is using a Monument data provider (**not** a Map data provider). If you still see a Map data provider, that could be due to one of two reasons.
+- If you have previously saved customizations for the vending machine using a Map data provider, you need to Reset the vending machine to allow it to switch to a Monument data provider.
+- If the monument bounds do not envelope the vending machine's position, you need to reconfigure the monument bounds and try again.
 
 ## Developer API
 
