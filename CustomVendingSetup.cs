@@ -4292,19 +4292,19 @@ namespace Oxide.Plugins
         }
 
         [ProtoContract]
-        public class SerializableVector3
+        public struct SerializableVector3
         {
             [ProtoMember(1)]
             [JsonProperty("x")]
-            public float x;
+            public readonly float x;
 
             [ProtoMember(2)]
             [JsonProperty("y")]
-            public float y;
+            public readonly float y;
 
             [ProtoMember(3)]
             [JsonProperty("z")]
-            public float z;
+            public readonly float z;
 
             public SerializableVector3() {}
 
