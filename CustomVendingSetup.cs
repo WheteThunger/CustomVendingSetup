@@ -4292,6 +4292,41 @@ namespace Oxide.Plugins
         }
 
         [ProtoContract]
+        public class SerializableVector3
+        {
+            [ProtoMember(1)]
+            [JsonProperty("x")]
+            public float x;
+
+            [ProtoMember(2)]
+            [JsonProperty("y")]
+            public float y;
+
+            [ProtoMember(3)]
+            [JsonProperty("z")]
+            public float z;
+
+            public SerializableVector3() {}
+
+            public SerializableVector3(float x, float y, float z)
+            {
+                this.x = x;
+                this.y = y;
+                this.z = z;
+            }
+
+            public static implicit operator Vector3(SerializableVector3 vector)
+            {
+                return new Vector3(vector.x, vector.y, vector.z);
+            }
+
+            public static implicit operator SerializableVector3(Vector3 vector)
+            {
+                return new SerializableVector3(vector.x, vector.y, vector.z);
+            }
+        }
+
+        [ProtoContract]
         [JsonObject(MemberSerialization.OptIn)]
         private class VendingMachineState
         {
@@ -4307,6 +4342,7 @@ namespace Oxide.Plugins
                 {
                     EntityId = vendingMachine.net.ID.Value,
                     SalesData = salesData.Select(CustomSalesData.FromVendingMachineSalesData).ToArray(),
+                    Position = vendingMachine.transform.position,
                 };
             }
 
@@ -4317,6 +4353,10 @@ namespace Oxide.Plugins
             [ProtoMember(2)]
             [JsonProperty("SalesData")]
             public CustomSalesData[] SalesData = Array.Empty<CustomSalesData>();
+
+            [ProtoMember(3)]
+            [JsonProperty("Position")]
+            public SerializableVector3 Position;
 
             public void ApplyToVendingMachine(NPCVendingMachine vendingMachine)
             {
@@ -4360,9 +4400,12 @@ namespace Oxide.Plugins
 
             public VendingMachineState FindState(NPCVendingMachine vendingMachine)
             {
+                var position = vendingMachine.transform.position;
+
                 foreach (var vendingMachineState in VendingMachines)
                 {
-                    if (vendingMachineState.EntityId == vendingMachine.net.ID.Value)
+                    if (vendingMachineState.EntityId == vendingMachine.net.ID.Value
+                        || AreVectorsClose(vendingMachineState.Position, position))
                         return vendingMachineState;
                 }
 
