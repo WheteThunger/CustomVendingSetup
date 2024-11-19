@@ -13,7 +13,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
-using Facepunch;
+using ConVar;
 using ProtoBuf;
 using UnityEngine;
 using VLB;
@@ -24,6 +24,8 @@ using CustomGetDataCallback = System.Func<Newtonsoft.Json.Linq.JObject>;
 using CustomSaveDataCallback = System.Action<Newtonsoft.Json.Linq.JObject>;
 using CustomGetSkinCallback = System.Func<ulong>;
 using CustomSetSkinCallback = System.Action<ulong>;
+using Pool = Facepunch.Pool;
+using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
@@ -3644,6 +3646,11 @@ namespace Oxide.Plugins
                 _vendingMachine.CancelInvoke(_vendingMachine.Refill);
 
                 InvokeRandomized(TimedRefill, 1, 1, 0.1f);
+
+                if (_vendingMachine is InvisibleVendingMachine invisibleVendingMachine)
+                {
+                    _vendingMachine.CancelInvoke(invisibleVendingMachine.CheckSellOrderRefresh);
+                }
             }
 
             private ulong GetOriginalSkin()
@@ -3674,6 +3681,12 @@ namespace Oxide.Plugins
 
                 _vendingMachine.InstallFromVendingOrders();
                 _vendingMachine.InvokeRandomized(_vendingMachine.Refill, 1f, 1f, 0.1f);
+
+                if (_vendingMachine is InvisibleVendingMachine { canRefreshOrders: true } invisibleVendingMachine)
+                {
+                    invisibleVendingMachine.nextOrderRefresh = Server.waterWellNpcSalesRefreshFrequency * 60f * 60f;
+                    invisibleVendingMachine.InvokeRepeating(invisibleVendingMachine.CheckSellOrderRefresh, 30f, 30f);
+                }
             }
         }
 
