@@ -29,7 +29,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.14.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.14.1")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -306,7 +306,13 @@ namespace Oxide.Plugins
             }
 
             var sellOrder = vendingMachine.sellOrders.sellOrders[sellOrderIndex];
-            var currencyAmount = GetAdjustedPrice(offer, sellOrder) * numberOfTransactions;
+            if (offer.SellItem.ItemDefinition == NPCVendingMachine.ScrapItem && sellOrder.receivedQuantityMultiplier != 1f)
+            {
+                // Modify the amount of scrap received according to dynamic pricing.
+                sellAmount = GetTotalPriceForOrder(sellAmount, sellOrder.receivedQuantityMultiplier);
+            }
+
+            var currencyAmount = GetTotalPriceForOrder(offer.CurrencyItem.Amount, sellOrder.priceMultiplier) * numberOfTransactions;
             var currencyProvider = _paymentProviderResolver.Resolve(offer.CurrencyItem);
             if (currencyProvider.GetBalance(player) < currencyAmount)
             {
@@ -356,7 +362,7 @@ namespace Oxide.Plugins
                 OnMarketplaceItemPurchase = onMarketplaceItemPurchase,
             });
 
-            vendingMachine.RecordSale(sellOrderIndex, sellAmount);
+            vendingMachine.RecordSale(sellOrderIndex, sellAmount, offer.CurrencyItem.Amount * numberOfTransactions);
 
             // These can now be unset since the "CanVendingStockRefill" hook can no longer be called after this point.
             _performingInstantRestock = false;
@@ -839,11 +845,6 @@ namespace Oxide.Plugins
         private static bool CanVendingMachineBroadcast(NPCVendingMachine vendingMachine)
         {
             return vendingMachine.GetParentEntity() is not TravellingVendor;
-        }
-
-        private static int GetAdjustedPrice(VendingOffer vendingOffer, SellOrder sellOrder)
-        {
-            return Mathf.Max(Mathf.RoundToInt(vendingOffer.CurrencyItem.Amount * sellOrder.priceMultiplier), 1);
         }
 
         private static VendingOffer[] GetOffersFromVendingMachine(NPCVendingMachine vendingMachine)
