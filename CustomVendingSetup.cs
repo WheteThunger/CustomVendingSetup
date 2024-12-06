@@ -13,7 +13,6 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
-using ConVar;
 using ProtoBuf;
 using UnityEngine;
 using VLB;
@@ -29,7 +28,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.14.1")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.14.2")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -3685,7 +3684,7 @@ namespace Oxide.Plugins
 
                 if (_vendingMachine is InvisibleVendingMachine { canRefreshOrders: true } invisibleVendingMachine)
                 {
-                    invisibleVendingMachine.nextOrderRefresh = Server.waterWellNpcSalesRefreshFrequency * 60f * 60f;
+                    invisibleVendingMachine.nextOrderRefresh = ConVar.Server.waterWellNpcSalesRefreshFrequency * 60f * 60f;
                     invisibleVendingMachine.InvokeRepeating(invisibleVendingMachine.CheckSellOrderRefresh, 30f, 30f);
                 }
             }
