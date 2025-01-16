@@ -28,7 +28,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.14.2")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.14.3")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -297,18 +297,18 @@ namespace Oxide.Plugins
             numberOfTransactions = Mathf.Clamp(numberOfTransactions, 1, HasCondition(offer.SellItem.ItemDefinition) ? 1 : 1000000);
 
             var sellAmount = offer.SellItem.Amount * numberOfTransactions;
-            var sellItemQuery = ItemQuery.FromSellItem(offer.SellItem);
-            if (ItemUtils.SumContainerItems(vendingMachine.inventory, ref sellItemQuery) < sellAmount)
-            {
-                // The vending machine has insufficient stock.
-                return False;
-            }
-
             var sellOrder = vendingMachine.sellOrders.sellOrders[sellOrderIndex];
             if (offer.SellItem.ItemDefinition == NPCVendingMachine.ScrapItem && sellOrder.receivedQuantityMultiplier != 1f)
             {
                 // Modify the amount of scrap received according to dynamic pricing.
                 sellAmount = GetTotalPriceForOrder(sellAmount, sellOrder.receivedQuantityMultiplier);
+            }
+
+            var sellItemQuery = ItemQuery.FromSellItem(offer.SellItem);
+            if (ItemUtils.SumContainerItems(vendingMachine.inventory, ref sellItemQuery) < sellAmount)
+            {
+                // The vending machine has insufficient stock.
+                return False;
             }
 
             var currencyAmount = GetTotalPriceForOrder(offer.CurrencyItem.Amount, sellOrder.priceMultiplier) * numberOfTransactions;
