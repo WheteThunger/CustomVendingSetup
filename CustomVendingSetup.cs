@@ -28,7 +28,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.14.3")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.14.4")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -408,6 +408,8 @@ namespace Oxide.Plugins
                 return null;
 
             ExposedHooks.OnCustomVendingSetupGiveSoldItem(vendingMachine, item, player);
+
+            item.SetItemOwnership(player, ItemOwnershipPhrases.VendorSale);
 
             // Simply give the item, without splitting it, since stack size logic has already been taken into account.
             player.GiveItem(item);
