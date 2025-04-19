@@ -28,7 +28,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.14.4")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.14.5")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -825,6 +825,19 @@ namespace Oxide.Plugins
         private static bool HasCondition(ItemDefinition itemDefinition)
         {
             return itemDefinition.condition is { enabled: true, max: > 0 };
+        }
+
+        private static bool HasItemMod<T>(ItemDefinition itemDefinition, out T itemModOfType) where T : ItemMod
+        {
+            foreach (var itemMod in itemDefinition.itemMods)
+            {
+                itemModOfType = itemMod as T;
+                if (itemModOfType is not null)
+                    return true;
+            }
+
+            itemModOfType = null;
+            return false;
         }
 
         private static void OpenVendingMachine(BasePlayer player, NPCVendingMachine vendingMachine)
@@ -3857,26 +3870,37 @@ namespace Oxide.Plugins
                     item.instanceData.dataInt = DataInt;
                 }
 
-                if (Contents is { Count: > 0 })
+                var contentsCount = Contents?.Count ?? 0;
+                if (Capacity > 0 || contentsCount > 0)
                 {
                     if (item.contents == null)
                     {
-                        item.contents = new ItemContainer();
-                        item.contents.ServerInitialize(null, Math.Max(Capacity, Contents.Count));
-                        item.contents.GiveUID();
-                        item.contents.parent = item;
+                        var capacity = Math.Max(Capacity, contentsCount);
+                        if (HasItemMod(item.info, out ItemModContainerArmorSlot itemMod) && capacity > 0)
+                        {
+                            itemMod.CreateAtCapacity(capacity, item);
+                        }
+                        else
+                        {
+                            item.contents = new ItemContainer();
+                            item.contents.ServerInitialize(item, capacity);
+                            item.contents.GiveUID();
+                        }
                     }
                     else
                     {
                         item.contents.capacity = Math.Max(item.contents.capacity, Capacity);
                     }
 
-                    foreach (var childItemSpec in Contents)
+                    if (Contents != null)
                     {
-                        var childItem = childItemSpec.Create(childItemSpec.Amount);
-                        if (!childItem.MoveToContainer(item.contents, childItemSpec.Position))
+                        foreach (var childItemSpec in Contents)
                         {
-                            childItem.Remove();
+                            var childItem = childItemSpec.Create(childItemSpec.Amount);
+                            if (!childItem.MoveToContainer(item.contents, childItemSpec.Position))
+                            {
+                                childItem.Remove();
+                            }
                         }
                     }
                 }
