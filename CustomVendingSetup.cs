@@ -28,7 +28,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.14.5")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.14.6")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -3464,6 +3464,15 @@ namespace Oxide.Plugins
                     item.Remove();
                 }
 
+                // Disable food spoiling
+                _vendingMachine.PoweredFoodSpoilageRateMultiplier = 0f;
+                _vendingMachine.SetFlag(IOEntity.Flag_HasPower, true);
+
+                if (_vendingMachine.numSlots == 0 || _vendingMachine.inventory.capacity == 0)
+                {
+                    _vendingMachine.inventory.capacity = 128;
+                }
+
                 _vendingMachine.ClearSellOrders();
 
                 // Save original values.
@@ -3618,7 +3627,7 @@ namespace Oxide.Plugins
                     }
                     else
                     {
-                        LogError($"Unable to add {item.amount} '{item.info.shortname}' because the vending machine container rejected it.");
+                        LogError($"Unable to add {item.amount} '{item.info.shortname}' because the vending machine container rejected it. Capacity is {_vendingMachine.inventory.capacity}.");
 
                         item.Remove();
 
