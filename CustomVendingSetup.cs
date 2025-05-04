@@ -29,7 +29,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.14.6")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.14.7")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -2153,7 +2153,12 @@ namespace Oxide.Plugins
 
             public int GetBalance(BasePlayer player)
             {
-                return Convert.ToInt32(_plugin.CallPlugin(_ownerPlugin, "Balance", (ulong)player.userID));
+                var balance = Convert.ToDouble(_plugin.CallPlugin(_ownerPlugin, "Balance", (ulong)player.userID));
+                // Any balance beyond Int32 min/max value is probably irrelevantly high/low. This can be revisited if
+                // any single purchase would cost more. This approach is OK because the return value of this method is
+                // only ever used for display and comparison, meaning we won't accidentally set the balance to an
+                // incorrect clamped value.
+                return (int)Math.Clamp(balance, int.MinValue, int.MaxValue);
             }
 
             public bool AddBalance(BasePlayer player, int amount, TransactionContext transaction)
