@@ -1,6 +1,5 @@
 ﻿// #define DEBUG_READONLY
 
-using HarmonyLib;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Oxide.Core;
@@ -38,7 +37,6 @@ namespace Oxide.Plugins
         [PluginReference]
         private readonly Plugin BagOfHolding, Economics, ItemRetriever, MonumentFinder, ServerRewards;
 
-        private static CustomVendingSetup _plugin;
         private SavedPrefabRelativeData _prefabRelativeData;
         private SavedMapData _mapData;
         private SavedSalesData _salesData;
@@ -101,41 +99,10 @@ namespace Oxide.Plugins
 
         #endregion
 
-        #region Harmony Patches
-
-        [AutoPatch]
-        [HarmonyPatch(typeof(VendingMachineMapMarker), nameof(VendingMachineMapMarker.Save), typeof(BaseNetworkable.SaveInfo))]
-        private static class Patch_VendingMachineMapMarker_Save
-        {
-            [HarmonyPostfix]
-            private static void Postfix(VendingMachineMapMarker __instance, BaseNetworkable.SaveInfo info)
-            {
-                if (_plugin == null
-                    || info.forDisk
-                    || __instance.server_vendingMachine is not NPCVendingMachine vendingMachine
-                    || !_plugin.IsCustomized(vendingMachine))
-                    return;
-
-                if (vendingMachine.IsLocalized && vendingMachine.shopName != vendingMachine.Phrase.english)
-                {
-                    // Fix issue where the shop name as seen in the map "Store" menu (after clicking on the marker)
-                    // shows the localized name instead of the customized name.
-                    info.msg.vendingMachine.translationToken = "";
-                }
-
-                // Disassociate the vending machine from the map marker. This fixes an issue where knowledge of the
-                // vending machine somehow overrides the map marker name, even when no translation token is sent.
-                info.msg.vendingMachine.networkID = new NetworkableId(0);
-            }
-        }
-
-        #endregion
-
         #region Hooks
 
         private void Init()
         {
-            _plugin = this;
             _config.Init();
             _prefabRelativeData = SavedPrefabRelativeData.Load();
             _salesData = SavedSalesData.Load();
@@ -200,8 +167,6 @@ namespace Oxide.Plugins
             ObjectCache.Clear<int>();
             ObjectCache.Clear<float>();
             ObjectCache.Clear<ulong>();
-
-            _plugin = null;
         }
 
         private void OnNewSave()
@@ -3525,22 +3490,14 @@ namespace Oxide.Plugins
                 _vendingMachine.BypassDynamicPricing = profile.BypassDynamicPricing;
                 _vendingMachine.skinID = profile.SkinId;
 
-                var updateMapMarker = false;
-
-                if (!string.IsNullOrEmpty(profile.ShopName) && _vendingMachine.shopName != profile.ShopName)
+                if (!string.IsNullOrEmpty(profile.ShopName))
                 {
                     _vendingMachine.shopName = profile.ShopName;
-                    updateMapMarker = true;
                 }
 
                 if (_vendingMachine.IsBroadcasting() != profile.Broadcast)
                 {
                     _vendingMachine.SetFlag(VendingMachineFlags.Broadcasting, profile.Broadcast);
-                    updateMapMarker = true;
-                }
-
-                if (updateMapMarker)
-                {
                     _vendingMachine.UpdateMapMarker();
                 }
 
@@ -3740,22 +3697,14 @@ namespace Oxide.Plugins
                 _vendingMachine.BypassDynamicPricing = _originalBypassDynamicPricing;
                 _vendingMachine.skinID = GetOriginalSkin();
 
-                var updateMapMarker = false;
-
-                if (_originalShopName != null && _vendingMachine.shopName != _originalShopName)
+                if (_originalShopName != null)
                 {
                     _vendingMachine.shopName = _originalShopName;
-                    updateMapMarker = true;
                 }
 
                 if (_originalBroadcast != null && _originalBroadcast != _vendingMachine.IsBroadcasting())
                 {
                     _vendingMachine.SetFlag(VendingMachineFlags.Broadcasting, _originalBroadcast.Value);
-                    updateMapMarker = true;
-                }
-
-                if (updateMapMarker)
-                {
                     _vendingMachine.UpdateMapMarker();
                 }
 
