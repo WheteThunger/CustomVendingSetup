@@ -312,7 +312,7 @@ namespace Oxide.Plugins
             }
 
             var currencyAmount = GetTotalPriceForOrder(offer.CurrencyItem.Amount, sellOrder.priceMultiplier) * numberOfTransactions;
-            var currencyProvider = _paymentProviderResolver.Resolve(offer.CurrencyItem);
+            var currencyProvider = _paymentProviderResolver.Resolve(offer);
             if (currencyProvider.GetBalance(player) < currencyAmount)
             {
                 // The player has insufficient currency.
@@ -353,7 +353,7 @@ namespace Oxide.Plugins
                 _itemBeingSold = offer.SellItem;
             }
 
-            _paymentProviderResolver.Resolve(offer.SellItem).AddBalance(player, sellAmount, new TransactionContext
+            _paymentProviderResolver.Resolve(offer).AddBalance(player, sellAmount, new TransactionContext
             {
                 VendingMachine = vendingMachine,
                 SellItem = offer.SellItem,
@@ -2046,7 +2046,8 @@ namespace Oxide.Plugins
 
         private class ItemsPaymentProvider : IPaymentProvider
         {
-            public VendingItem VendingItem;
+            public VendingItem CurrencyItem;
+            public VendingItem SellItem;
 
             private CustomVendingSetup _plugin;
 
@@ -2057,7 +2058,7 @@ namespace Oxide.Plugins
 
             public int GetBalance(BasePlayer player)
             {
-                var itemQuery = ItemQuery.FromCurrencyItem(VendingItem);
+                var itemQuery = ItemQuery.FromCurrencyItem(CurrencyItem, ShouldAlwaysSpecifySkinId());
                 return _plugin.SumPlayerItems(player, ref itemQuery);
             }
 
@@ -2098,9 +2099,15 @@ namespace Oxide.Plugins
                 if (amount <= 0)
                     return true;
 
-                var itemQuery = ItemQuery.FromCurrencyItem(VendingItem);
+                var itemQuery = ItemQuery.FromCurrencyItem(CurrencyItem, ShouldAlwaysSpecifySkinId());
                 _plugin.TakePlayerItems(player, ref itemQuery, amount, collect);
                 return true;
+            }
+
+            private bool ShouldAlwaysSpecifySkinId()
+            {
+                return CurrencyItem.SkinId == 0
+                    && CurrencyItem.ItemDefinition == SellItem.ItemDefinition;
             }
         }
 
@@ -2186,15 +2193,18 @@ namespace Oxide.Plugins
                 ServerRewardsPaymentProvider = new ServerRewardsPaymentProvider(plugin);
             }
 
-            public IPaymentProvider Resolve(VendingItem vendingItem)
+            public IPaymentProvider Resolve(VendingOffer offer)
             {
-                if (_config.Economics.MatchesItem(vendingItem) && EconomicsPaymentProvider.IsAvailable)
+                var currencyItem = offer.CurrencyItem;
+
+                if (_config.Economics.MatchesItem(currencyItem) && EconomicsPaymentProvider.IsAvailable)
                     return EconomicsPaymentProvider;
 
-                if (_config.ServerRewards.MatchesItem(vendingItem) && ServerRewardsPaymentProvider.IsAvailable)
+                if (_config.ServerRewards.MatchesItem(currencyItem) && ServerRewardsPaymentProvider.IsAvailable)
                     return ServerRewardsPaymentProvider;
 
-                _itemsPaymentProvider.VendingItem = vendingItem;
+                _itemsPaymentProvider.CurrencyItem = currencyItem;
+                _itemsPaymentProvider.SellItem = offer.SellItem;
                 return _itemsPaymentProvider;
             }
         }
@@ -2217,7 +2227,7 @@ namespace Oxide.Plugins
                 };
             }
 
-            public static ItemQuery FromCurrencyItem(VendingItem vendingItem)
+            public static ItemQuery FromCurrencyItem(VendingItem vendingItem, bool alwaysSpecifySkinId = false)
             {
                 var itemQuery = new ItemQuery
                 {
@@ -2226,7 +2236,7 @@ namespace Oxide.Plugins
                     ItemId = vendingItem.IsBlueprint ? BlueprintItemId : vendingItem.ItemId,
                 };
 
-                if (vendingItem.SkinId != 0)
+                if (alwaysSpecifySkinId || vendingItem.SkinId != 0)
                 {
                     itemQuery.SkinId = vendingItem.SkinId;
                 }
