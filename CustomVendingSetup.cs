@@ -1,6 +1,4 @@
-﻿// #define DEBUG_READONLY
-
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Oxide.Core;
 using Oxide.Core.Plugins;
@@ -28,7 +26,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.14.7")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.15.0")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -838,6 +836,20 @@ namespace Oxide.Plugins
 
             itemModOfType = null;
             return false;
+        }
+
+        private static T GetNearbyEntity<T>(Vector3 position, float maxDistance, int layerMask = -1) where T : BaseEntity
+        {
+            var list = Pool.Get<List<T>>();
+            Vis.Entities(position, maxDistance, list, layerMask, QueryTriggerInteraction.Ignore);
+            var result = list.FirstOrDefault();
+            Pool.FreeUnmanaged(ref list);
+            return result;
+        }
+
+        private static DeepSeaFloatingCity GetDeepSeaFloatingCityAtPosition(Vector3 position)
+        {
+            return GetNearbyEntity<DeepSeaFloatingCity>(position, 2f, Rust.Layers.Mask.World);
         }
 
         private static void OpenVendingMachine(BasePlayer player, NPCVendingMachine vendingMachine)
@@ -1979,6 +1991,21 @@ namespace Oxide.Plugins
                     };
                 }
 
+                if (vendingMachine.IsInDeepSeaCached)
+                {
+                    var position = vendingMachine.transform.position;
+                    var floatingCity = GetDeepSeaFloatingCityAtPosition(position);
+                    if (floatingCity == null)
+                        return null;
+
+                    return new PrefabRelativePosition
+                    {
+                        _vendingMachine = vendingMachine,
+                        _parentEntity = floatingCity,
+                        _position = floatingCity.transform.InverseTransformPoint(position),
+                    };
+                }
+
                 var monument = monumentFinderAdapter.GetMonumentAdapter(vendingMachine);
                 if (monument == null)
                     return null;
@@ -2005,8 +2032,24 @@ namespace Oxide.Plugins
 
             public Vector3 GetCurrentPosition()
             {
-                return _monumentAdapter?.InverseTransformPoint(_vendingMachine.transform.position)
-                       ?? _vendingMachine.transform.localPosition;
+                // Monument data provider
+                if (_monumentAdapter != null)
+                    return _monumentAdapter.InverseTransformPoint(_vendingMachine.transform.position);
+
+                // Entity data provider (Parented)
+                if (_vendingMachine.HasParent())
+                    return _vendingMachine.transform.localPosition;
+
+                // Entity data provider (Deep Sea)
+                if (_vendingMachine.IsInDeepSeaCached)
+                {
+                    var deepSea = GetDeepSeaFloatingCityAtPosition(_vendingMachine.transform.position);
+                    if (deepSea != null)
+                        return deepSea.transform.InverseTransformPoint(_vendingMachine.transform.position);
+                }
+
+                // Map data provider
+                return _vendingMachine.transform.position;
             }
 
             public string GetDataProviderLabel()
