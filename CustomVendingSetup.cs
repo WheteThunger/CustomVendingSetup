@@ -26,7 +26,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.15.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.15.1")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -310,7 +310,7 @@ namespace Oxide.Plugins
             }
 
             var currencyAmount = GetTotalPriceForOrder(offer.CurrencyItem.Amount, sellOrder.priceMultiplier) * numberOfTransactions;
-            var currencyProvider = _paymentProviderResolver.Resolve(offer);
+            var currencyProvider = _paymentProviderResolver.Resolve(offer, isForCurrency: true);
             if (currencyProvider.GetBalance(player) < currencyAmount)
             {
                 // The player has insufficient currency.
@@ -351,7 +351,7 @@ namespace Oxide.Plugins
                 _itemBeingSold = offer.SellItem;
             }
 
-            _paymentProviderResolver.Resolve(offer).AddBalance(player, sellAmount, new TransactionContext
+            _paymentProviderResolver.Resolve(offer, isForCurrency: false).AddBalance(player, sellAmount, new TransactionContext
             {
                 VendingMachine = vendingMachine,
                 SellItem = offer.SellItem,
@@ -2236,17 +2236,17 @@ namespace Oxide.Plugins
                 ServerRewardsPaymentProvider = new ServerRewardsPaymentProvider(plugin);
             }
 
-            public IPaymentProvider Resolve(VendingOffer offer)
+            public IPaymentProvider Resolve(VendingOffer offer, bool isForCurrency)
             {
-                var currencyItem = offer.CurrencyItem;
+                var vendingItemForPaymentProviderResolution = isForCurrency ? offer.CurrencyItem : offer.SellItem;
 
-                if (_config.Economics.MatchesItem(currencyItem) && EconomicsPaymentProvider.IsAvailable)
+                if (_config.Economics.MatchesItem(vendingItemForPaymentProviderResolution) && EconomicsPaymentProvider.IsAvailable)
                     return EconomicsPaymentProvider;
 
-                if (_config.ServerRewards.MatchesItem(currencyItem) && ServerRewardsPaymentProvider.IsAvailable)
+                if (_config.ServerRewards.MatchesItem(vendingItemForPaymentProviderResolution) && ServerRewardsPaymentProvider.IsAvailable)
                     return ServerRewardsPaymentProvider;
 
-                _itemsPaymentProvider.CurrencyItem = currencyItem;
+                _itemsPaymentProvider.CurrencyItem = offer.CurrencyItem;
                 _itemsPaymentProvider.SellItem = offer.SellItem;
                 return _itemsPaymentProvider;
             }
