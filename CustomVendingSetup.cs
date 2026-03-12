@@ -26,7 +26,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.15.1")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.16.0")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -3796,6 +3796,7 @@ namespace Oxide.Plugins
                     Amount = item.amount,
                     DisplayName = item.name,
                     SkinId = item.skin,
+                    Text = item.text,
                     IsBlueprint = item.blueprintTarget != 0,
                     DataInt = item.instanceData?.dataInt ?? 0,
                     AmmoAmount = ammoAmount,
@@ -3853,6 +3854,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Skin", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public ulong SkinId;
+
+            [JsonProperty("Text", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public string Text;
 
             [JsonProperty("IsBlueprint", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public bool IsBlueprint;
@@ -3925,6 +3929,11 @@ namespace Oxide.Plugins
 
                 item.name = DisplayName;
                 item.position = Position;
+
+                if (!string.IsNullOrEmpty(Text))
+                {
+                    item.text = Text;
+                }
 
                 if (DataInt != 0)
                 {
@@ -4023,6 +4032,7 @@ namespace Oxide.Plugins
                     AmmoType = AmmoType,
                     Capacity = Capacity,
                     Contents = Contents,
+                    Text = Text,
                 };
             }
         }
@@ -4398,7 +4408,8 @@ namespace Oxide.Plugins
         }
 
         [ProtoContract]
-        public struct SerializableVector3
+        [JsonObject(MemberSerialization.OptIn)]
+        private class SerializableVector3
         {
             [ProtoMember(1)]
             [JsonProperty("x")]
