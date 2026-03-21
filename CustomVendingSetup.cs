@@ -8,7 +8,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
 using ProtoBuf;
@@ -4447,18 +4446,12 @@ namespace Oxide.Plugins
         [JsonObject(MemberSerialization.OptIn)]
         private class VendingMachineState
         {
-            private static readonly FieldInfo AllSalesDataField = typeof(NPCVendingMachine)
-                .GetField("allSalesData", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-
             public static VendingMachineState FromVendingMachine(NPCVendingMachine vendingMachine)
             {
-                var salesData = (NPCVendingMachine.SalesData[])AllSalesDataField?.GetValue(vendingMachine)
-                                ?? Array.Empty<NPCVendingMachine.SalesData>();
-
                 return new VendingMachineState
                 {
                     EntityId = vendingMachine.net.ID.Value,
-                    SalesData = salesData.Select(CustomSalesData.FromVendingMachineSalesData).ToArray(),
+                    SalesData = vendingMachine.allSalesData.Select(CustomSalesData.FromVendingMachineSalesData).ToArray(),
                     Position = vendingMachine.transform.position,
                 };
             }
@@ -4481,7 +4474,7 @@ namespace Oxide.Plugins
                         .Take(vendingMachine.sellOrders.sellOrders.Count)
                         .ToArray() ?? Array.Empty<NPCVendingMachine.SalesData>();
 
-                AllSalesDataField?.SetValue(vendingMachine, salesData);
+                vendingMachine.allSalesData = salesData;
             }
         }
 
