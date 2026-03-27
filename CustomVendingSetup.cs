@@ -32,7 +32,7 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        private readonly Plugin BagOfHolding, Economics, ItemRetriever, MonumentFinder, ServerRewards;
+        private readonly Plugin BagOfHolding, CustomItemDefinitions, Economics, ItemRetriever, MonumentFinder, ServerRewards;
 
         private SavedPrefabRelativeData _prefabRelativeData;
         private SavedMapData _mapData;
@@ -62,6 +62,7 @@ namespace Oxide.Plugins
         private readonly object True = true;
         private readonly object False = false;
 
+        private CustomItemDefinitionsAdapter _customItemDefinitionsAdapter;
         private ItemRetrieverAdapter _itemRetrieverAdapter;
         private PluginDataProviderRegistry _dataProviderRegistry = new();
         private ComponentTracker<NPCVendingMachine, VendingMachineComponent> _componentTracker = new();
@@ -85,6 +86,7 @@ namespace Oxide.Plugins
         public CustomVendingSetup()
         {
             _monumentFinderAdapter = new MonumentFinderAdapter(this);
+            _customItemDefinitionsAdapter = new CustomItemDefinitionsAdapter(this);
             _itemRetrieverAdapter = new ItemRetrieverAdapter(this);
             _componentFactory = new ComponentFactory<NPCVendingMachine, VendingMachineComponent>(this, _componentTracker);
             _vendingMachineManager = new VendingMachineManager(this, _componentFactory, _dataProviderRegistry);
@@ -489,8 +491,6 @@ namespace Oxide.Plugins
 
         #region API
 
-
-
         [HookMethod(nameof(API_IsCustomized))]
         public object API_IsCustomized(NPCVendingMachine vendingMachine)
         {
@@ -643,6 +643,40 @@ namespace Oxide.Plugins
                     return;
 
                 _plugin.BagOfHolding.Call("API_RemoveLimitProfile", container);
+            }
+        }
+
+        private class CustomItemDefinitionsAdapter
+        {
+            private CustomVendingSetup _plugin;
+
+            private Plugin CustomItemDefinitions => _plugin.CustomItemDefinitions;
+
+            public CustomItemDefinitionsAdapter(CustomVendingSetup plugin)
+            {
+                _plugin = plugin;
+            }
+
+            public bool IsCustomDefinition(ItemDefinition itemDefinition)
+            {
+                return CustomItemDefinitions?.Call("IsCustomDefinition", itemDefinition) is true;
+            }
+
+            public ulong GetSkin(ItemDefinition itemDefinition)
+            {
+                return CustomItemDefinitions?.Call("GetSkin", itemDefinition) is ulong skinId ? skinId : 0;
+            }
+
+            public bool TryGetSkin(ItemDefinition itemDefinition, out ulong skinId)
+            {
+                if (!IsCustomDefinition(itemDefinition))
+                {
+                    skinId = 0;
+                    return false;
+                }
+
+                skinId = GetSkin(itemDefinition);
+                return true;
             }
         }
 
@@ -1762,7 +1796,7 @@ namespace Oxide.Plugins
             private const float PaddingLeft = 5.5f;
             private const float PaddingBottom = 8;
 
-            public static string RenderShopUI(VendingProfile vendingProfile)
+            public static string RenderShopUI(CustomVendingSetup plugin, VendingProfile vendingProfile)
             {
                 var cuiElements = new CuiElementContainer
                 {
@@ -1813,9 +1847,15 @@ namespace Oxide.Plugins
                         AddItemOverlay(cuiElements, numValidOffers - offerIndex, offer, isCurrency: false);
                     }
 
-                    if (offer.CurrencyItem.SkinId != 0)
+                    // Items managed by CustomItemDefinitions may have a "default" skin which gets displayed.
+                    // We need to find out what the default skin is so that we can also display it.
+                    var currencySkinId = offer.CurrencyItem.SkinId == 0 && plugin._customItemDefinitionsAdapter.TryGetSkin(offer.CurrencyItem.ItemDefinition, out var defaultSkinId)
+                        ? defaultSkinId
+                        : offer.CurrencyItem.SkinId;
+
+                    if (currencySkinId != 0)
                     {
-                        AddItemOverlay(cuiElements, numValidOffers - offerIndex, offer, isCurrency: true);
+                        AddItemOverlay(cuiElements, numValidOffers - offerIndex, offer, isCurrency: true, currencySkinId);
                     }
 
                     offerIndex++;
@@ -1827,7 +1867,7 @@ namespace Oxide.Plugins
                 return CuiHelper.ToJson(cuiElements);
             }
 
-            private static void AddItemOverlay(CuiElementContainer cuiElements, int indexFromBottom, VendingOffer offer, bool isCurrency = false)
+            private static void AddItemOverlay(CuiElementContainer cuiElements, int indexFromBottom, VendingOffer offer, bool isCurrency = false, ulong? overrideSkinId = null)
             {
                 var offsetX = isCurrency ? OffsetXCurrency : OffsetXItem;
                 var offsetY = 41.5f + 74 * indexFromBottom;
@@ -1867,7 +1907,7 @@ namespace Oxide.Plugins
                         {
                             Sprite = "assets/content/textures/generic/fulltransparent.tga",
                             ItemId = vendingItem.ItemId,
-                            SkinId = vendingItem.SkinId,
+                            SkinId = overrideSkinId ?? vendingItem.SkinId,
                             FadeIn = 0.1f,
                         },
                         new CuiRectTransformComponent
@@ -3294,7 +3334,7 @@ namespace Oxide.Plugins
 
             public string GetShopUI()
             {
-                return _cachedShopUI ??= ShopUIRenderer.RenderShopUI(Profile);
+                return _cachedShopUI ??= ShopUIRenderer.RenderShopUI(_plugin, Profile);
             }
 
             protected void UpdateDroneAccessibility()
