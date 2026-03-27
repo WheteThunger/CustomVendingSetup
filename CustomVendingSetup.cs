@@ -778,10 +778,9 @@ namespace Oxide.Plugins
             if (args.Length < 2)
                 return;
 
-            if (!PassesUICommandChecks(player, args, out var vendingMachine, out var vendingController))
+            if (!PassesUICommandChecks(player, args, out var basePlayer, out var vendingMachine, out var vendingController))
                 return;
 
-            var basePlayer = player.Object as BasePlayer;
             var subCommand = args[1];
 
             switch (subCommand)
@@ -1300,12 +1299,13 @@ namespace Oxide.Plugins
                    ?? ItemUtils.TakePlayerItems(player, ref itemQuery, amount, collect);
         }
 
-        private bool PassesUICommandChecks(IPlayer player, string[] args, out NPCVendingMachine vendingMachine, out VendingController controller)
+        private bool PassesUICommandChecks(IPlayer player, string[] args, out BasePlayer basePlayer, out NPCVendingMachine vendingMachine, out VendingController controller)
         {
             vendingMachine = null;
             controller = null;
+            basePlayer = player.Object as BasePlayer;
 
-            if (player.IsServer || !player.HasPermission(PermissionUse))
+            if (basePlayer == null || !player.HasPermission(PermissionUse))
                 return false;
 
             if (args.Length == 0 || !ulong.TryParse(args[0], out var vendingMachineId))
