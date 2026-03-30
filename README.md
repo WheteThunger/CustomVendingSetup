@@ -87,8 +87,10 @@ Default configuration:
 
 ```json
 {
+  "Enable liquid currency": false,
   "Shop UI settings": {
-    "Enable skin overlays": true
+    "Enable skin overlays": false,
+    "Enable liquid overlays": false
   },
   "Economics integration": {
     "Enabled": false,
@@ -104,8 +106,10 @@ Default configuration:
 }
 ```
 
+- `Enable liquid currency` (`true` or `false`) -- While `true`, you can use liquid items (e.g., water) as currency, allowing players to directly sell liquids to vending machines without consuming their containers. For example, if you configure the cost of an item to be a bottle of 500ml water, the vending machine UI will instead display 500ml of water as the cost (rather than displaying the bottle), and when the player makes the purchase, 500ml of water will be taken from any available containers in their inventory.
 - `Shop UI settings`
   - `Enable skin overlays` (`true` or `false`) -- While `true`, skin images will be overlaid on top of items when needed. For example, to display currency skin.
+  - `Enable liquid overlays` (`true` or `false`) -- While `true`, liquid overlays will be displayed on top of non-empty liquid container merchandise, such as bottles of water, allowing players to see the type and quantity of liquid in the container. Note: This is NOT related to liquid currency.
 - `Economics integration` -- Controls integration with the Economics plugin.
   - `Enabled` (`true` or `false`) -- Determines whether Economics integration is enabled. While enabled, the below configured item will be used as a proxy to configure vending machines to buy and sell Economics currency.
   - `Item short name` -- Determines the item that will be associated with Economics currency. When you want to configure a sale offer to buy or sell Economics currency, you must place this item into the corresponding "For Sale" or "Currency" column while editing the vending machine. Whichever item you configure here will be displayed in the shop view, though you may cover it up with the image of a skin by setting a non-`0` `Item skin ID` and setting `Enable skin overlays` to `true`.

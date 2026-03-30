@@ -59,8 +59,8 @@ namespace Oxide.Plugins
 
         private static readonly Regex KeyValueRegex = new(@"^([^:]+):(.+(?:\n[^:\n]+$)*)", RegexOptions.Compiled | RegexOptions.Multiline);
 
-        private readonly object True = true;
-        private readonly object False = false;
+        private static readonly object True = true;
+        private static readonly object False = false;
 
         private CustomItemDefinitionsAdapter _customItemDefinitionsAdapter;
         private ItemRetrieverAdapter _itemRetrieverAdapter;
@@ -78,8 +78,8 @@ namespace Oxide.Plugins
         private bool _isServerInitialized;
         private bool _performingInstantRestock;
         private VendingItem _itemBeingSold;
-        private Dictionary<string, object> _itemRetrieverQuery = new();
         private List<Item> _reusableItemList = new();
+        private HashSet<int> _reusableIntSet = new();
         private object[] _objectArray1 = new object[1];
         private object[] _objectArray2 = new object[2];
 
@@ -257,13 +257,14 @@ namespace Oxide.Plugins
             if (profile?.Offers == null)
                 return;
 
-            if (_config.ShopUISettings.EnableSkinOverlays)
+            if (_config.ShopUISettings.EnableOverlays)
             {
                 component.ShowShopUI(player);
             }
 
             if ((_config.Economics.EnabledAndValid && profile.HasPaymentProviderCurrency(_config.Economics))
-                || (_config.ServerRewards.EnabledAndValid && profile.HasPaymentProviderCurrency(_config.ServerRewards)))
+                || (_config.ServerRewards.EnabledAndValid && profile.HasPaymentProviderCurrency(_config.ServerRewards))
+                || _config.EnableLiquidCurrency && profile.HasLiquidCurrency())
             {
                 // Make sure OnEntitySaved/OnInventoryNetworkUpdate are subscribed to modify network updates.
                 _playersNeedingFakeInventory.Add(player);
@@ -310,7 +311,11 @@ namespace Oxide.Plugins
                 return False;
             }
 
-            var currencyAmount = GetTotalPriceForOrder(offer.CurrencyItem.Amount, sellOrder.priceMultiplier) * numberOfTransactions;
+            var currencyAmountPerTransaction = offer.CurrencyItem.IsLiquidContainer(out _, out var liquidCurrencyAmount)
+                ? liquidCurrencyAmount
+                : offer.CurrencyItem.Amount;
+
+            var currencyAmount = GetTotalPriceForOrder(currencyAmountPerTransaction, sellOrder.priceMultiplier) * numberOfTransactions;
             var currencyProvider = _paymentProviderResolver.Resolve(offer, isForCurrency: true);
             if (currencyProvider.GetBalance(player) < currencyAmount)
             {
@@ -696,7 +701,8 @@ namespace Oxide.Plugins
         {
             public ItemRetrieverApi Api { get; private set; }
 
-            private CustomVendingSetup _plugin;
+            private readonly CustomVendingSetup _plugin;
+            private readonly Dictionary<string, object> _itemRetrieverQuery = new();
 
             private Plugin ItemRetriever => _plugin.ItemRetriever;
 
@@ -714,6 +720,54 @@ namespace Oxide.Plugins
             {
                 Api = null;
             }
+
+            public int? SumPlayerItems(BasePlayer player, ref ItemQuery itemQuery)
+            {
+                // Item Retriever does not currently support searching liquid containers.
+                if (IsLiquidItem(itemQuery.ItemId))
+                    return null;
+
+                return Api?.SumPlayerItems.Invoke(player, SetupItemRetrieverQuery(ref itemQuery));
+            }
+
+            public int? TakePlayerItems(BasePlayer player, ref ItemQuery itemQuery, int amount, List<Item> collect = null)
+            {
+                // Item Retriever does not currently support searching liquid containers.
+                if (IsLiquidItem(itemQuery.ItemId))
+                    return null;
+
+                return Api?.TakePlayerItems.Invoke(player, SetupItemRetrieverQuery(ref itemQuery), amount, collect);
+            }
+
+            private Dictionary<string, object> SetupItemRetrieverQuery(ref ItemQuery itemQuery)
+            {
+                _itemRetrieverQuery.Clear();
+                _itemRetrieverQuery["MinCondition"] = ObjectCache.Get(MinCurrencyCondition);
+                _itemRetrieverQuery["RequireEmpty"] = True;
+
+                if (itemQuery.BlueprintId != 0)
+                {
+                    _itemRetrieverQuery["BlueprintId"] = ObjectCache.Get(itemQuery.BlueprintId);
+                }
+
+                if (itemQuery.DataInt != 0)
+                {
+                    _itemRetrieverQuery["DataInt"] = ObjectCache.Get(itemQuery.DataInt);
+                }
+
+                if (itemQuery.ItemId != 0)
+                {
+                    _itemRetrieverQuery["ItemId"] = ObjectCache.Get(itemQuery.ItemId);
+                }
+
+                if (itemQuery.SkinId.HasValue)
+                {
+                    _itemRetrieverQuery["SkinId"] = ObjectCache.Get(itemQuery.SkinId.Value);
+                }
+
+                return _itemRetrieverQuery;
+            }
+
         }
 
         #endregion
@@ -1184,6 +1238,11 @@ namespace Oxide.Plugins
             return dict;
         }
 
+        private static bool IsLiquidItem(int itemId)
+        {
+            return ItemManager.FindItemDefinition(itemId)?.itemType == ItemContainer.ContentsType.Liquid;
+        }
+
         private object CallPlugin<T1>(Plugin plugin, string methodName, T1 arg1)
         {
             _objectArray1[0] = ObjectCache.Get(arg1);
@@ -1255,47 +1314,45 @@ namespace Oxide.Plugins
                 nextInvisibleSlot++;
             }
 
+            if (_config.EnableLiquidCurrency && profile.HasLiquidCurrency())
+            {
+                _reusableIntSet.Clear();
+
+                foreach (var offer in profile.Offers)
+                {
+                    if (offer.CurrencyItem?.IsLiquidContainer(out var liquidDefinition) == true)
+                    {
+                        _reusableIntSet.Add(liquidDefinition.itemid);
+                    }
+                }
+
+                foreach (var itemId in _reusableIntSet)
+                {
+                    var itemQuery = new ItemQuery { ItemId = itemId };
+                    var amount = SumPlayerItems(player, ref itemQuery);
+                    AddItemForNetwork(
+                        containerData,
+                        slot: nextInvisibleSlot,
+                        itemId: itemId,
+                        amount: amount,
+                        uid: new ItemId(ulong.MaxValue - (ulong)nextInvisibleSlot)
+                    );
+                    nextInvisibleSlot++;
+                }
+            }
+
             containerData.slots = nextInvisibleSlot;
-        }
-
-        private Dictionary<string, object> SetupItemRetrieverQuery(ref ItemQuery itemQuery)
-        {
-            _itemRetrieverQuery.Clear();
-            _itemRetrieverQuery["MinCondition"] = ObjectCache.Get(MinCurrencyCondition);
-            _itemRetrieverQuery["RequireEmpty"] = True;
-
-            if (itemQuery.BlueprintId != 0)
-            {
-                _itemRetrieverQuery["BlueprintId"] = ObjectCache.Get(itemQuery.BlueprintId);
-            }
-
-            if (itemQuery.DataInt != 0)
-            {
-                _itemRetrieverQuery["DataInt"] = ObjectCache.Get(itemQuery.DataInt);
-            }
-
-            if (itemQuery.ItemId != 0)
-            {
-                _itemRetrieverQuery["ItemId"] = ObjectCache.Get(itemQuery.ItemId);
-            }
-
-            if (itemQuery.SkinId.HasValue)
-            {
-                _itemRetrieverQuery["SkinId"] = ObjectCache.Get(itemQuery.SkinId.Value);
-            }
-
-            return _itemRetrieverQuery;
         }
 
         private int SumPlayerItems(BasePlayer player, ref ItemQuery itemQuery)
         {
-            return _itemRetrieverAdapter?.Api?.SumPlayerItems.Invoke(player, SetupItemRetrieverQuery(ref itemQuery))
-                   ?? ItemUtils.SumPlayerItems(player, ref itemQuery);
+            return _itemRetrieverAdapter?.SumPlayerItems(player, ref itemQuery)
+                ?? ItemUtils.SumPlayerItems(player, ref itemQuery);
         }
 
         private int TakePlayerItems(BasePlayer player, ref ItemQuery itemQuery, int amount, List<Item> collect = null)
         {
-            return _itemRetrieverAdapter?.Api?.TakePlayerItems.Invoke(player, SetupItemRetrieverQuery(ref itemQuery), amount, collect)
+            return _itemRetrieverAdapter?.TakePlayerItems(player, ref itemQuery, amount, collect)
                    ?? ItemUtils.TakePlayerItems(player, ref itemQuery, amount, collect);
         }
 
@@ -1816,6 +1873,7 @@ namespace Oxide.Plugins
                     },
                 };
 
+                var uiSettings = plugin._config.ShopUISettings;
                 var skinsByItemShortName = new Dictionary<string, HashSet<ulong>>();
                 var numValidOffers = 0;
 
@@ -1826,13 +1884,16 @@ namespace Oxide.Plugins
 
                     numValidOffers++;
 
-                    if (!skinsByItemShortName.TryGetValue(offer.SellItem.ShortName, out var skins))
+                    if (uiSettings.EnableSkinOverlays)
                     {
-                        skins = new HashSet<ulong>();
-                        skinsByItemShortName[offer.SellItem.ShortName] = skins;
-                    }
+                        if (!skinsByItemShortName.TryGetValue(offer.SellItem.ShortName, out var skins))
+                        {
+                            skins = new HashSet<ulong>();
+                            skinsByItemShortName[offer.SellItem.ShortName] = skins;
+                        }
 
-                    skins.Add(offer.SellItem.SkinId);
+                        skins.Add(offer.SellItem.SkinId);
+                    }
                 }
 
                 var offerIndex = 0;
@@ -1842,20 +1903,28 @@ namespace Oxide.Plugins
                     if (!offer.IsValid)
                         continue;
 
-                    if (skinsByItemShortName[offer.SellItem.ShortName].Count > 1)
+                    if (uiSettings.EnableSkinOverlays)
                     {
-                        AddItemOverlay(cuiElements, numValidOffers - offerIndex, offer, isCurrency: false);
+                        if (skinsByItemShortName[offer.SellItem.ShortName].Count > 1)
+                        {
+                            AddItemOverlay(cuiElements, numValidOffers - offerIndex, offer, isCurrency: false);
+                        }
+
+                        // Items managed by CustomItemDefinitions may have a "default" skin which gets displayed.
+                        // We need to find out what the default skin is so that we can display it.
+                        var currencySkinId = offer.CurrencyItem.SkinId == 0 && plugin._customItemDefinitionsAdapter.TryGetSkin(offer.CurrencyItem.ItemDefinition, out var defaultSkinId)
+                            ? defaultSkinId
+                            : offer.CurrencyItem.SkinId;
+
+                        if (currencySkinId != 0)
+                        {
+                            AddItemOverlay(cuiElements, numValidOffers - offerIndex, offer, isCurrency: true, currencySkinId);
+                        }
                     }
 
-                    // Items managed by CustomItemDefinitions may have a "default" skin which gets displayed.
-                    // We need to find out what the default skin is so that we can also display it.
-                    var currencySkinId = offer.CurrencyItem.SkinId == 0 && plugin._customItemDefinitionsAdapter.TryGetSkin(offer.CurrencyItem.ItemDefinition, out var defaultSkinId)
-                        ? defaultSkinId
-                        : offer.CurrencyItem.SkinId;
-
-                    if (currencySkinId != 0)
+                    if (uiSettings.EnableLiquidOverlays && offer.SellItem.IsLiquidContainer())
                     {
-                        AddItemOverlay(cuiElements, numValidOffers - offerIndex, offer, isCurrency: true, currencySkinId);
+                        AddLiquidOverlay(cuiElements, numValidOffers - offerIndex, offer.SellItem, isCurrency: false);
                     }
 
                     offerIndex++;
@@ -1931,6 +2000,69 @@ namespace Oxide.Plugins
                             new CuiTextComponent
                             {
                                 Text = $"x{vendingItem.Amount}",
+                                Align = TextAnchor.LowerRight,
+                                FontSize = 12,
+                                Color = "0.65 0.65 0.65 1",
+                                FadeIn = 0.1f,
+                            },
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = UIConstants.AnchorMin,
+                                AnchorMax = UIConstants.AnchorMax,
+                                OffsetMin = $"{offsetX + 4} {offsetY + 1f}",
+                                OffsetMax = $"{offsetX - 3f + OverlaySize} {offsetY + OverlaySize}",
+                            },
+                        },
+                    });
+                }
+            }
+
+            private static void AddLiquidOverlay(CuiElementContainer cuiElements, int indexFromBottom, VendingItem vendingItem, bool isCurrency = false)
+            {
+                var offsetX = isCurrency ? OffsetXCurrency : OffsetXItem;
+                var offsetY = 41.5f + 74 * indexFromBottom;
+
+                var liquidItem = vendingItem.Contents[0];
+                var liquidItemDef = ItemManager.FindItemDefinition(liquidItem.ShortName);
+                if (liquidItemDef == null)
+                    return;
+
+                // Add a small icon overlay showing the liquid type in the top-right corner.
+                const float liquidIconSize = 24f;
+                cuiElements.Add(new CuiElement
+                {
+                    Parent = UIName,
+                    Components =
+                    {
+                        new CuiImageComponent
+                        {
+                            Sprite = "assets/content/textures/generic/fulltransparent.tga",
+                            ItemId = liquidItemDef.itemid,
+                            SkinId = liquidItem.SkinId,
+                            Color = "0.7 0.7 0.7 1",
+                            FadeIn = 0.1f,
+                        },
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = "0 0",
+                            AnchorMax = "0 0",
+                            OffsetMin = $"{offsetX + OverlaySize - liquidIconSize} {offsetY + OverlaySize - liquidIconSize - 2}",
+                            OffsetMax = $"{offsetX + OverlaySize} {offsetY + OverlaySize - 2}",
+                        },
+                    },
+                });
+
+                if (vendingItem.Amount == 1)
+                {
+                    // Add text showing the liquid amount (positioned like regular item amount, but with "ml" suffix)
+                    cuiElements.Add(new CuiElement
+                    {
+                        Parent = UIName,
+                        Components =
+                        {
+                            new CuiTextComponent
+                            {
+                                Text = $"{liquidItem.Amount}ml",
                                 Align = TextAnchor.LowerRight,
                                 FontSize = 12,
                                 Color = "0.65 0.65 0.65 1",
@@ -2140,7 +2272,7 @@ namespace Oxide.Plugins
 
             public int GetBalance(BasePlayer player)
             {
-                var itemQuery = ItemQuery.FromCurrencyItem(CurrencyItem, ShouldAlwaysSpecifySkinId());
+                var itemQuery = ItemQuery.FromCurrencyItem(CurrencyItem, ShouldAlwaysSpecifySkinId(), AllowLiquidCurrency());
                 return _plugin.SumPlayerItems(player, ref itemQuery);
             }
 
@@ -2181,7 +2313,7 @@ namespace Oxide.Plugins
                 if (amount <= 0)
                     return true;
 
-                var itemQuery = ItemQuery.FromCurrencyItem(CurrencyItem, ShouldAlwaysSpecifySkinId());
+                var itemQuery = ItemQuery.FromCurrencyItem(CurrencyItem, ShouldAlwaysSpecifySkinId(), AllowLiquidCurrency());
                 _plugin.TakePlayerItems(player, ref itemQuery, amount, collect);
                 return true;
             }
@@ -2190,6 +2322,11 @@ namespace Oxide.Plugins
             {
                 return CurrencyItem.SkinId == 0
                     && CurrencyItem.ItemDefinition == SellItem.ItemDefinition;
+            }
+
+            private bool AllowLiquidCurrency()
+            {
+                return _plugin._config.EnableLiquidCurrency;
             }
         }
 
@@ -2295,7 +2432,12 @@ namespace Oxide.Plugins
 
         #region Item Query
 
-        private struct ItemQuery
+        private interface IItemQuery
+        {
+            int GetUsableAmount(Item item);
+        }
+
+        private struct ItemQuery : IItemQuery
         {
             public static ItemQuery FromSellItem(VendingItem vendingItem)
             {
@@ -2309,7 +2451,7 @@ namespace Oxide.Plugins
                 };
             }
 
-            public static ItemQuery FromCurrencyItem(VendingItem vendingItem, bool alwaysSpecifySkinId = false)
+            public static ItemQuery FromCurrencyItem(VendingItem vendingItem, bool alwaysSpecifySkinId = false, bool allowLiquidCurrency = false)
             {
                 var itemQuery = new ItemQuery
                 {
@@ -2321,6 +2463,11 @@ namespace Oxide.Plugins
                 if (alwaysSpecifySkinId || vendingItem.SkinId != 0)
                 {
                     itemQuery.SkinId = vendingItem.SkinId;
+                }
+
+                if (allowLiquidCurrency && vendingItem.IsLiquidContainer(out var liquidDefinition))
+                {
+                    itemQuery.ItemId = liquidDefinition.itemid;
                 }
 
                 return itemQuery;
@@ -2370,6 +2517,11 @@ namespace Oxide.Plugins
 
         private static class ItemUtils
         {
+            // Copied from Item Retriever.
+            private const Item.Flag SearchableItemFlag = (Item.Flag)(1 << 24);
+            private const Item.Flag UnsearchableItemFlag = (Item.Flag)(1 << 25);
+            private const ItemDefinition.Flag SearchableItemDefinitionFlag = (ItemDefinition.Flag)(1 << 24);
+
             public static Item FindFirstContainerItem(ItemContainer container, ref ItemQuery itemQuery)
             {
                 foreach (var item in container.itemList)
@@ -2381,36 +2533,74 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            public static int SumContainerItems(ItemContainer container, ref ItemQuery itemQuery)
+            // Mostly copied from Item Retriever.
+            public static int SumPlayerItems(BasePlayer player, ref ItemQuery itemQuery)
+            {
+                return SumItems(player.inventory.containerMain.itemList, ref itemQuery)
+                    + SumItems(player.inventory.containerBelt.itemList, ref itemQuery)
+                    + SumItems(player.inventory.containerWear.itemList, ref itemQuery, childItemsOnly: true);
+            }
+
+            // Mostly copied from Item Retriever.
+            public static int TakePlayerItems(BasePlayer player, ref ItemQuery itemQuery, int amount, List<Item> collect = null)
+            {
+                var amountTaken = TakeContainerItems(player.inventory.containerMain, ref itemQuery, amount, collect);
+                if (amountTaken >= amount)
+                    return amountTaken;
+
+                amountTaken += TakeContainerItems(player.inventory.containerBelt, ref itemQuery, amount - amountTaken, collect);
+                if (amountTaken >= amount)
+                    return amountTaken;
+
+                amountTaken += TakeContainerItems(player.inventory.containerWear, ref itemQuery, amount - amountTaken, collect, childItemsOnly: true);
+                if (amountTaken >= amount)
+                    return amountTaken;
+
+                return amountTaken;
+            }
+
+            public static int SumContainerItems<T>(ItemContainer container, ref T itemQuery) where T : IItemQuery
+            {
+                return SumItems(container.itemList, ref itemQuery);
+            }
+
+            public static int TakeContainerItems<T>(ItemContainer container, ref T itemQuery, int totalAmountToTake, List<Item> collect = null, bool childItemsOnly = false) where T : IItemQuery
+            {
+                return TakeItems(container.itemList, ref itemQuery, totalAmountToTake, collect, childItemsOnly);
+            }
+
+            // Copied from Item Retriever.
+            public static int SumItems<T>(List<Item> itemList, ref T itemQuery, bool childItemsOnly = false) where T : IItemQuery
             {
                 var sum = 0;
 
-                foreach (var item in container.itemList)
+                for (var i = 0; i < itemList.Count; i++)
                 {
-                    sum += itemQuery.GetUsableAmount(item);
+                    var item = itemList[i];
+                    sum += childItemsOnly ? 0 : itemQuery.GetUsableAmount(item);
+
+                    if (HasSearchableContainer(item, out var childItemList))
+                    {
+                        sum += SumItems(childItemList, ref itemQuery);
+                    }
                 }
 
                 return sum;
             }
 
-            public static int SumPlayerItems(BasePlayer player, ref ItemQuery itemQuery)
-            {
-                return SumContainerItems(player.inventory.containerMain, ref itemQuery)
-                    + SumContainerItems(player.inventory.containerBelt, ref itemQuery);
-            }
-
-            public static int TakeContainerItems(ItemContainer container, ref ItemQuery itemQuery, int totalAmountToTake, List<Item> collect = null)
+            // Copied from Item Retriever.
+            public static int TakeItems<T>(List<Item> itemList, ref T itemQuery, int totalAmountToTake, List<Item> collect, bool childItemsOnly = false) where T : IItemQuery
             {
                 var totalAmountTaken = 0;
 
-                for (var i = container.itemList.Count - 1; i >= 0; i--)
+                for (var i = itemList.Count - 1; i >= 0; i--)
                 {
                     var amountToTake = totalAmountToTake - totalAmountTaken;
                     if (amountToTake <= 0)
                         break;
 
-                    var item = container.itemList[i];
-                    var usableAmount = itemQuery.GetUsableAmount(item);
+                    var item = itemList[i];
+                    var usableAmount = childItemsOnly ? 0 : itemQuery.GetUsableAmount(item);
                     if (usableAmount > 0)
                     {
                         amountToTake = Math.Min(item.amount, amountToTake);
@@ -2425,6 +2615,7 @@ namespace Oxide.Plugins
                                 {
                                     splitItem.CollectedForCrafting(playerOwner);
                                 }
+
                                 collect.Add(splitItem);
                             }
                             else
@@ -2450,6 +2641,11 @@ namespace Oxide.Plugins
                         totalAmountTaken += amountToTake;
                     }
 
+                    if (HasSearchableContainer(item, out var childItemList))
+                    {
+                        totalAmountTaken += TakeItems(childItemList, ref itemQuery, amountToTake, collect);
+                    }
+
                     if (totalAmountTaken >= totalAmountToTake)
                         return totalAmountTaken;
                 }
@@ -2457,21 +2653,30 @@ namespace Oxide.Plugins
                 return totalAmountTaken;
             }
 
-            public static int TakePlayerItems(BasePlayer player, ref ItemQuery itemQuery, int amountToTake, List<Item> collect = null)
+            // Copied from Item Retriever.
+            private static bool IsSearchableItemDefinition(ItemDefinition itemDefinition)
             {
-                var amountTaken = TakeContainerItems(player.inventory.containerMain, ref itemQuery, amountToTake, collect);
-                if (amountTaken >= amountToTake)
-                    return amountTaken;
+                return (itemDefinition.flags & (ItemDefinition.Flag.Backpack | SearchableItemDefinitionFlag)) != 0;
+            }
 
-                amountTaken += TakeContainerItems(player.inventory.containerBelt, ref itemQuery, amountToTake - amountTaken, collect);
-                if (amountTaken >= amountToTake)
-                    return amountTaken;
+            // Mostly copied from Item Retriever.
+            private static bool HasSearchableContainer(Item item, out List<Item> itemList)
+            {
+                itemList = item.contents?.itemList;
+                if (itemList is not { Count: > 0 })
+                    return false;
 
-                amountTaken += TakeContainerItems(player.inventory.containerWear, ref itemQuery, amountToTake - amountTaken, collect);
-                if (amountTaken >= amountToTake)
-                    return amountTaken;
+                // Allow searching liquid containers.
+                if (item.contents?.allowedContents == ItemContainer.ContentsType.Liquid)
+                    return true;
 
-                return amountTaken;
+                if (item.HasFlag(SearchableItemFlag))
+                    return true;
+
+                if (item.HasFlag(UnsearchableItemFlag))
+                    return false;
+
+                return IsSearchableItemDefinition(item.info);
             }
         }
 
@@ -3599,15 +3804,32 @@ namespace Oxide.Plugins
                     if (!offer.IsValid)
                         continue;
 
+                    int currencyID, currencyAmountPerItem;
+                    bool currencyIsBP;
+
+                    // If the currency is a liquid container, display the liquid as the currency
+                    if (Plugin._config.EnableLiquidCurrency && offer.CurrencyItem.IsLiquidContainer(out var liquidDefinition, out var liquidAmount))
+                    {
+                        currencyID = liquidDefinition.itemid;
+                        currencyAmountPerItem = liquidAmount;
+                        currencyIsBP = false;
+                    }
+                    else
+                    {
+                        currencyID = offer.CurrencyItem.ItemId;
+                        currencyAmountPerItem = offer.CurrencyItem.Amount;
+                        currencyIsBP = offer.CurrencyItem.IsBlueprint;
+                    }
+
                     var vendingOffer = new SellOrder
                     {
                         ShouldPool = false,
                         itemToSellID = offer.SellItem.ItemId,
                         itemToSellAmount = offer.SellItem.Amount,
                         itemToSellIsBP = offer.SellItem.IsBlueprint,
-                        currencyID = offer.CurrencyItem.ItemId,
-                        currencyAmountPerItem = offer.CurrencyItem.Amount,
-                        currencyIsBP = offer.CurrencyItem.IsBlueprint,
+                        currencyID = currencyID,
+                        currencyAmountPerItem = currencyAmountPerItem,
+                        currencyIsBP = currencyIsBP,
                     };
 
                     Interface.CallHook("OnAddVendingOffer", _vendingMachine, vendingOffer);
@@ -4074,6 +4296,35 @@ namespace Oxide.Plugins
                     Text = Text,
                 };
             }
+
+            public bool IsLiquidContainer(out ItemDefinition liquidDefinition, out int amount)
+            {
+                liquidDefinition = null;
+
+                if (Capacity != 1 || Contents is not { Count: > 0 })
+                {
+                    amount = 0;
+                    return false;
+                }
+
+                var childItem = Contents[0];
+                amount = childItem.Amount;
+                if (amount <= 0)
+                    return false;
+
+                liquidDefinition = ItemManager.FindItemDefinition(childItem.ShortName);
+                return liquidDefinition?.itemType == ItemContainer.ContentsType.Liquid;
+            }
+
+            public bool IsLiquidContainer(out ItemDefinition liquidDefinition)
+            {
+                return IsLiquidContainer(out liquidDefinition, out _);
+            }
+
+            public bool IsLiquidContainer()
+            {
+                return IsLiquidContainer(out _, out _);
+            }
         }
 
         [JsonObject(MemberSerialization.OptIn)]
@@ -4264,6 +4515,20 @@ namespace Oxide.Plugins
                 foreach (var offer in Offers)
                 {
                     if (paymentProviderConfig.MatchesItem(offer.CurrencyItem))
+                        return true;
+                }
+
+                return false;
+            }
+
+            public bool HasLiquidCurrency()
+            {
+                if (Offers == null)
+                    return false;
+
+                foreach (var offer in Offers)
+                {
+                    if (offer.CurrencyItem.IsLiquidContainer())
                         return true;
                 }
 
@@ -4571,7 +4836,13 @@ namespace Oxide.Plugins
         private class ShopUISettings
         {
             [JsonProperty("Enable skin overlays")]
-            public bool EnableSkinOverlays = true;
+            public bool EnableSkinOverlays = false;
+
+            [JsonProperty("Enable liquid overlays")]
+            public bool EnableLiquidOverlays = false;
+
+            [JsonIgnore]
+            public bool EnableOverlays => EnableSkinOverlays || EnableLiquidOverlays;
         }
 
         [JsonObject(MemberSerialization.OptIn)]
@@ -4611,6 +4882,9 @@ namespace Oxide.Plugins
         [JsonObject(MemberSerialization.OptIn)]
         private class Configuration : SerializableConfiguration
         {
+            [JsonProperty("Enable liquid currency")]
+            public bool EnableLiquidCurrency;
+
             [JsonProperty("Shop UI settings")]
             public ShopUISettings ShopUISettings = new();
 
