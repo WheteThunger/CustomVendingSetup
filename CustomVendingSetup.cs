@@ -4756,7 +4756,7 @@ namespace Oxide.Plugins
                 return new VendingMachineState
                 {
                     EntityId = vendingMachine.net.ID.Value,
-                    SalesData = vendingMachine.allSalesData.Select(CustomSalesData.FromVendingMachineSalesData).ToArray(),
+                    SalesData = vendingMachine.allSalesData?.Select(CustomSalesData.FromVendingMachineSalesData).ToArray(),
                     Position = vendingMachine.transform.position,
                 };
             }
