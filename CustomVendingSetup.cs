@@ -3839,6 +3839,24 @@ namespace Oxide.Plugins
                 CustomRefill(maxRefill: true);
 
                 Plugin._salesData.FindState(_vendingMachine)?.ApplyToVendingMachine(_vendingMachine);
+
+                FixDynamicSalesDirection();
+            }
+
+            private void FixDynamicSalesDirection()
+            {
+                if (_vendingMachine.allSalesData == null)
+                    return;
+
+                // Whether scrap is the merchandise needs to be stored in sales data metadata so that the multiplier
+                // is correctly increased or decreased at the end of each sales period. Otherwise, the dynamic price
+                // might decrease when it should increase or vice versa.
+                for (var i = 0; i < _vendingMachine.allSalesData.Length; i++)
+                {
+                    var sellOrder = _vendingMachine.sellOrders.sellOrders.ElementAtOrDefault(i);
+                    var isForReceivedCurrency = sellOrder?.itemToSellID == NPCVendingMachine.ScrapItem.itemid;
+                    _vendingMachine.allSalesData[i].IsForReceivedCurrency = isForReceivedCurrency;
+                }
             }
 
             private void ScheduleRefill(int offerIndex, VendingOffer offer, int min = 0)
@@ -4030,6 +4048,8 @@ namespace Oxide.Plugins
                     invisibleVendingMachine.nextOrderRefresh = ConVar.Server.waterWellNpcSalesRefreshFrequency * 60f * 60f;
                     invisibleVendingMachine.InvokeRepeating(invisibleVendingMachine.CheckSellOrderRefresh, 30f, 30f);
                 }
+
+                FixDynamicSalesDirection();
             }
         }
 
