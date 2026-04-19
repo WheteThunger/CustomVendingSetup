@@ -301,7 +301,7 @@ namespace Oxide.Plugins
             if (offer.SellItem.ItemDefinition == NPCVendingMachine.ScrapItem && sellOrder.receivedQuantityMultiplier != 1f)
             {
                 // Modify the amount of scrap received according to dynamic pricing.
-                sellAmount = GetTotalPriceForOrder(sellAmount, sellOrder.receivedQuantityMultiplier);
+                sellAmount = GetTotalReceivedMerchandiseForOrder(offer.SellItem.Amount, sellOrder.receivedQuantityMultiplier) * numberOfTransactions;
             }
 
             var sellItemQuery = ItemQuery.FromSellItem(offer.SellItem);
