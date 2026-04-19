@@ -1065,10 +1065,14 @@ namespace Oxide.Plugins
                 var destinationSlot = OrderIndexToSlot(orderIndex);
 
                 if (!sellItem.MoveToContainer(container, destinationSlot))
+                {
                     sellItem.Remove();
+                }
 
                 if (!currencyItem.MoveToContainer(container, destinationSlot + 1))
+                {
                     currencyItem.Remove();
+                }
             }
 
             // Add 7 note items, so the user doesn't have to make them.
@@ -1390,8 +1394,10 @@ namespace Oxide.Plugins
             });
         }
 
-        private bool IsCustomized(NPCVendingMachine vendingMachine) =>
-            _vendingMachineManager.GetController(vendingMachine)?.Profile?.Offers != null;
+        private bool IsCustomized(NPCVendingMachine vendingMachine)
+        {
+            return _vendingMachineManager.GetController(vendingMachine)?.Profile?.Offers != null;
+        }
 
         #endregion
 
@@ -3837,6 +3843,7 @@ namespace Oxide.Plugins
                 }
 
                 CustomRefill(maxRefill: true);
+                _vendingMachine.FullUpdate();
 
                 Plugin._salesData.FindState(_vendingMachine)?.ApplyToVendingMachine(_vendingMachine);
 
@@ -3877,16 +3884,12 @@ namespace Oxide.Plugins
             private void CustomRefill(bool maxRefill = false)
             {
                 if (_vendingMachine.IsDestroyed)
-                {
                     return;
-                }
 
                 for (var offerIndex = 0; offerIndex < Profile.Offers.Length; offerIndex++)
                 {
                     if (_refillTimes[offerIndex] > Time.realtimeSinceStartup)
-                    {
                         continue;
-                    }
 
                     var offer = Profile.Offers[offerIndex];
                     if (!offer.IsValid || offer.SellItem.Amount <= 0 || offer.CurrencyItem.Amount <= 0)
