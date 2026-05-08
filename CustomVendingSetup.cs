@@ -257,11 +257,6 @@ namespace Oxide.Plugins
             if (profile?.Offers == null)
                 return;
 
-            if (_config.ShopUISettings.EnableOverlays)
-            {
-                component.ShowShopUI(player);
-            }
-
             if ((_config.Economics.EnabledAndValid && profile.HasPaymentProviderCurrency(_config.Economics))
                 || (_config.ServerRewards.EnabledAndValid && profile.HasPaymentProviderCurrency(_config.ServerRewards))
                 || _config.EnableLiquidCurrency && profile.HasLiquidCurrency())
@@ -1846,246 +1841,6 @@ namespace Oxide.Plugins
             }
         }
 
-        private static class ShopUIRenderer
-        {
-            public const string UIName = "CustomVendingSetup.ShopUI";
-
-            private const float OffsetXItem = 210;
-            private const float OffsetXCurrency = 352;
-            private const float OverlaySize = 60;
-
-            private const float IconSize = 50;
-            private const float PaddingLeft = 5.5f;
-            private const float PaddingBottom = 8;
-
-            public static string RenderShopUI(CustomVendingSetup plugin, VendingProfile vendingProfile)
-            {
-                var cuiElements = new CuiElementContainer
-                {
-                    new CuiElement
-                    {
-                        Parent = "Hud.Menu",
-                        Name = UIName,
-                        DestroyUi = UIName,
-                        Components =
-                        {
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = UIConstants.AnchorMin,
-                                AnchorMax = UIConstants.AnchorMax,
-                            },
-                        },
-                    },
-                };
-
-                var uiSettings = plugin._config.ShopUISettings;
-                var skinsByItemShortName = new Dictionary<string, HashSet<ulong>>();
-                var numValidOffers = 0;
-
-                foreach (var offer in vendingProfile.Offers)
-                {
-                    if (!offer.IsValid)
-                        continue;
-
-                    numValidOffers++;
-
-                    if (uiSettings.EnableSkinOverlays)
-                    {
-                        if (!skinsByItemShortName.TryGetValue(offer.SellItem.ShortName, out var skins))
-                        {
-                            skins = new HashSet<ulong>();
-                            skinsByItemShortName[offer.SellItem.ShortName] = skins;
-                        }
-
-                        skins.Add(offer.SellItem.SkinId);
-                    }
-                }
-
-                var offerIndex = 0;
-
-                foreach (var offer in vendingProfile.Offers)
-                {
-                    if (!offer.IsValid)
-                        continue;
-
-                    if (uiSettings.EnableSkinOverlays)
-                    {
-                        if (skinsByItemShortName[offer.SellItem.ShortName].Count > 1)
-                        {
-                            AddItemOverlay(cuiElements, numValidOffers - offerIndex, offer, isCurrency: false);
-                        }
-
-                        // Items managed by CustomItemDefinitions may have a "default" skin which gets displayed.
-                        // We need to find out what the default skin is so that we can display it.
-                        var currencySkinId = offer.CurrencyItem.SkinId == 0 && plugin._customItemDefinitionsAdapter.TryGetSkin(offer.CurrencyItem.ItemDefinition, out var defaultSkinId)
-                            ? defaultSkinId
-                            : offer.CurrencyItem.SkinId;
-
-                        if (currencySkinId != 0)
-                        {
-                            AddItemOverlay(cuiElements, numValidOffers - offerIndex, offer, isCurrency: true, currencySkinId);
-                        }
-                    }
-
-                    if (uiSettings.EnableLiquidOverlays && offer.SellItem.IsLiquidContainer())
-                    {
-                        AddLiquidOverlay(cuiElements, numValidOffers - offerIndex, offer.SellItem, isCurrency: false);
-                    }
-
-                    offerIndex++;
-                }
-
-                if (cuiElements.Count == 1)
-                    return string.Empty;
-
-                return CuiHelper.ToJson(cuiElements);
-            }
-
-            private static void AddItemOverlay(CuiElementContainer cuiElements, int indexFromBottom, VendingOffer offer, bool isCurrency = false, ulong? overrideSkinId = null)
-            {
-                var offsetX = isCurrency ? OffsetXCurrency : OffsetXItem;
-                var offsetY = 41.5f + 74 * indexFromBottom;
-
-                var vendingItem = isCurrency ? offer.CurrencyItem : offer.SellItem;
-
-                // Background
-                cuiElements.Add(new CuiElement
-                {
-                    Parent = UIName,
-                    Components =
-                    {
-                        new CuiRawImageComponent
-                        {
-                            Color = "0.35 0.35 0.35 1",
-                            Sprite = UIConstants.TexturedBackgroundSprite,
-                            FadeIn = 0.1f,
-                        },
-                        new CuiRectTransformComponent
-                        {
-                            AnchorMin = UIConstants.AnchorMin,
-                            AnchorMax = UIConstants.AnchorMax,
-                            OffsetMin = $"{offsetX} {offsetY}",
-                            OffsetMax = $"{offsetX + OverlaySize} {offsetY + OverlaySize}",
-                        },
-                    },
-                });
-
-                // Skin icon
-                cuiElements.Add(new CuiElement
-                {
-                    Name = $"{UIName}.Offer.{indexFromBottom}.Currency",
-                    Parent = UIName,
-                    Components =
-                    {
-                        new CuiImageComponent
-                        {
-                            Sprite = "assets/content/textures/generic/fulltransparent.tga",
-                            ItemId = vendingItem.ItemId,
-                            SkinId = overrideSkinId ?? vendingItem.SkinId,
-                            FadeIn = 0.1f,
-                        },
-                        new CuiRectTransformComponent
-                        {
-                            AnchorMin = "0 0",
-                            AnchorMax = "0 0",
-                            OffsetMin = $"{offsetX + PaddingLeft} {offsetY + PaddingBottom}",
-                            OffsetMax = $"{offsetX + PaddingLeft + IconSize} {offsetY + PaddingBottom + IconSize}",
-                        },
-                    },
-                });
-
-                if (vendingItem.Amount > 1)
-                {
-                    // Amount
-                    cuiElements.Add(new CuiElement
-                    {
-                        Parent = UIName,
-                        Components =
-                        {
-                            new CuiTextComponent
-                            {
-                                Text = $"x{vendingItem.Amount}",
-                                Align = TextAnchor.LowerRight,
-                                FontSize = 12,
-                                Color = "0.65 0.65 0.65 1",
-                                FadeIn = 0.1f,
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = UIConstants.AnchorMin,
-                                AnchorMax = UIConstants.AnchorMax,
-                                OffsetMin = $"{offsetX + 4} {offsetY + 1f}",
-                                OffsetMax = $"{offsetX - 3f + OverlaySize} {offsetY + OverlaySize}",
-                            },
-                        },
-                    });
-                }
-            }
-
-            private static void AddLiquidOverlay(CuiElementContainer cuiElements, int indexFromBottom, VendingItem vendingItem, bool isCurrency = false)
-            {
-                var offsetX = isCurrency ? OffsetXCurrency : OffsetXItem;
-                var offsetY = 41.5f + 74 * indexFromBottom;
-
-                var liquidItem = vendingItem.Contents[0];
-                var liquidItemDef = ItemManager.FindItemDefinition(liquidItem.ShortName);
-                if (liquidItemDef == null)
-                    return;
-
-                // Add a small icon overlay showing the liquid type in the top-right corner.
-                const float liquidIconSize = 24f;
-                cuiElements.Add(new CuiElement
-                {
-                    Parent = UIName,
-                    Components =
-                    {
-                        new CuiImageComponent
-                        {
-                            Sprite = "assets/content/textures/generic/fulltransparent.tga",
-                            ItemId = liquidItemDef.itemid,
-                            SkinId = liquidItem.SkinId,
-                            Color = "0.7 0.7 0.7 1",
-                            FadeIn = 0.1f,
-                        },
-                        new CuiRectTransformComponent
-                        {
-                            AnchorMin = "0 0",
-                            AnchorMax = "0 0",
-                            OffsetMin = $"{offsetX + OverlaySize - liquidIconSize} {offsetY + OverlaySize - liquidIconSize - 2}",
-                            OffsetMax = $"{offsetX + OverlaySize} {offsetY + OverlaySize - 2}",
-                        },
-                    },
-                });
-
-                if (vendingItem.Amount == 1)
-                {
-                    // Add text showing the liquid amount (positioned like regular item amount, but with "ml" suffix)
-                    cuiElements.Add(new CuiElement
-                    {
-                        Parent = UIName,
-                        Components =
-                        {
-                            new CuiTextComponent
-                            {
-                                Text = $"{liquidItem.Amount}ml",
-                                Align = TextAnchor.LowerRight,
-                                FontSize = 12,
-                                Color = "0.65 0.65 0.65 1",
-                                FadeIn = 0.1f,
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = UIConstants.AnchorMin,
-                                AnchorMax = UIConstants.AnchorMax,
-                                OffsetMin = $"{offsetX + 4} {offsetY + 1f}",
-                                OffsetMax = $"{offsetX - 3f + OverlaySize} {offsetY + OverlaySize}",
-                            },
-                        },
-                    });
-                }
-            }
-        }
-
         #endregion
 
         #region Utilities
@@ -3459,18 +3214,16 @@ namespace Oxide.Plugins
 
             public bool HasVendingMachines => VendingMachineList.Count > 0;
 
-            protected CustomVendingSetup _plugin;
+            public CustomVendingSetup Plugin { get;}
 
             // List of vending machines with a position matching this controller.
             public HashSet<NPCVendingMachine> VendingMachineList = new();
 
             private ComponentFactory<NPCVendingMachine, VendingMachineComponent> _componentFactory;
 
-            private string _cachedShopUI;
-
             public VendingController(CustomVendingSetup plugin, ComponentFactory<NPCVendingMachine, VendingMachineComponent> componentFactory, IDataProvider dataProvider)
             {
-                _plugin = plugin;
+                Plugin = plugin;
                 _componentFactory = componentFactory;
                 DataProvider = dataProvider;
                 UpdateDroneAccessibility();
@@ -3481,7 +3234,7 @@ namespace Oxide.Plugins
                 if (EditController != null)
                     return;
 
-                EditController = new EditController(_plugin, this, vendingMachine, player);
+                EditController = new EditController(Plugin, this, vendingMachine, player);
             }
 
             public void HandleReset()
@@ -3489,9 +3242,7 @@ namespace Oxide.Plugins
                 DataProvider.SaveData(null);
                 SetupVendingMachines();
                 EditController?.Kill();
-                _plugin._inaccessibleVendingMachines.Remove(this);
-
-                _cachedShopUI = null;
+                Plugin._inaccessibleVendingMachines.Remove(this);
             }
 
             public void Destroy()
@@ -3509,9 +3260,6 @@ namespace Oxide.Plugins
 
                 DataProvider.SaveData(profile, vendingMachine);
                 SetupVendingMachines();
-
-                _cachedShopUI = null;
-
                 UpdateDroneAccessibility();
             }
 
@@ -3533,18 +3281,13 @@ namespace Oxide.Plugins
                 if (VendingMachineList.Count == 0)
                 {
                     EditController?.Kill();
-                    _plugin._inaccessibleVendingMachines.Remove(this);
+                    Plugin._inaccessibleVendingMachines.Remove(this);
                 }
             }
 
             public void OnEditControllerKilled()
             {
                 EditController = null;
-            }
-
-            public string GetShopUI()
-            {
-                return _cachedShopUI ??= ShopUIRenderer.RenderShopUI(_plugin, Profile);
             }
 
             protected void UpdateDroneAccessibility()
@@ -3554,11 +3297,11 @@ namespace Oxide.Plugins
 
                 if (Profile.Broadcast && !Profile.DroneAccessible)
                 {
-                    _plugin._inaccessibleVendingMachines.Add(this);
+                    Plugin._inaccessibleVendingMachines.Add(this);
                 }
                 else
                 {
-                    _plugin._inaccessibleVendingMachines.Remove(this);
+                    Plugin._inaccessibleVendingMachines.Remove(this);
                 }
             }
 
@@ -3665,7 +3408,6 @@ namespace Oxide.Plugins
             public VendingProfile Profile { get; private set; }
 
             private readonly List<BasePlayer> _adminUIViewers = new();
-            private readonly List<BasePlayer> _shopUIViewers = new();
             private VendingController _vendingController;
             private NPCVendingMachine _vendingMachine;
             private float[] _refillTimes;
@@ -3684,7 +3426,7 @@ namespace Oxide.Plugins
 
             public bool HasUI(BasePlayer player)
             {
-                return _adminUIViewers.Contains(player) || _shopUIViewers.Contains(player);
+                return _adminUIViewers.Contains(player);
             }
 
             public void ShowAdminUI(BasePlayer player)
@@ -3693,26 +3435,11 @@ namespace Oxide.Plugins
                 CuiHelper.AddUi(player, AdminUIRenderer.RenderAdminUI(Plugin, player, _vendingMachine, Profile));
             }
 
-            public void ShowShopUI(BasePlayer player)
-            {
-                var json = _vendingController.GetShopUI();
-                if (json == string.Empty)
-                    return;
-
-                _shopUIViewers.Add(player);
-                CuiHelper.AddUi(player, json);
-            }
-
             public void RemoveUI(BasePlayer player)
             {
                 if (_adminUIViewers.Remove(player))
                 {
                     DestroyAdminUI(player);
-                }
-
-                if (_shopUIViewers.Remove(player))
-                {
-                    DestroyShopUI(player);
                 }
 
                 // Make sure OnEntitySaved/OnInventoryNetworkUpdate are unsubscribed (when all players are removed).
@@ -3826,13 +3553,25 @@ namespace Oxide.Plugins
                         currencyIsBP = offer.CurrencyItem.IsBlueprint;
                     }
 
+                    // Items managed by CustomItemDefinitions may have a "default" skin which gets displayed.
+                    // We need to find out what the default skin is so that we can display it.
+                    var customItemDefinitionsAdapter = _vendingController.Plugin._customItemDefinitionsAdapter;
+                    var sellSkinId = offer.SellItem.SkinId == 0 && customItemDefinitionsAdapter.TryGetSkin(offer.SellItem.ItemDefinition, out var defaultSellSkinId)
+                        ? defaultSellSkinId
+                        : offer.SellItem.SkinId;
+                    var currencySkinId = offer.CurrencyItem.SkinId == 0 && customItemDefinitionsAdapter.TryGetSkin(offer.CurrencyItem.ItemDefinition, out var defaultSkinId)
+                        ? defaultSkinId
+                        : offer.CurrencyItem.SkinId;
+
                     var vendingOffer = new SellOrder
                     {
                         ShouldPool = false,
                         itemToSellID = offer.SellItem.ItemId,
+                        sellSkinId = sellSkinId,
                         itemToSellAmount = offer.SellItem.Amount,
                         itemToSellIsBP = offer.SellItem.IsBlueprint,
                         currencyID = currencyID,
+                        costSkinId = currencySkinId,
                         currencyAmountPerItem = currencyAmountPerItem,
                         currencyIsBP = currencyIsBP,
                     };
@@ -3985,21 +3724,11 @@ namespace Oxide.Plugins
                 CuiHelper.DestroyUi(player, AdminUIRenderer.UIName);
             }
 
-            private void DestroyShopUI(BasePlayer player)
-            {
-                CuiHelper.DestroyUi(player, ShopUIRenderer.UIName);
-            }
-
             private void DestroyUIs()
             {
                 foreach (var player in _adminUIViewers)
                 {
                     DestroyAdminUI(player);
-                }
-
-                foreach (var player in _shopUIViewers)
-                {
-                    DestroyShopUI(player);
                 }
             }
 
@@ -4365,12 +4094,14 @@ namespace Oxide.Plugins
                         ShortName = ItemManager.FindItemDefinition(sellOrder.itemToSellID)?.shortname,
                         Amount = sellOrder.itemToSellAmount,
                         IsBlueprint = sellOrder.itemToSellIsBP,
+                        SkinId = sellOrder.sellSkinId,
                     },
                     CurrencyItem = new VendingItem
                     {
                         ShortName = ItemManager.FindItemDefinition(sellOrder.currencyID)?.shortname,
                         Amount = sellOrder.currencyAmountPerItem,
                         IsBlueprint = sellOrder.currencyIsBP,
+                        SkinId = sellOrder.costSkinId,
                     },
                     RefillDelay = manifestEntry != null ? (int)manifestEntry.refillDelay : DefaultRefillDelay,
                 };
@@ -4855,19 +4586,6 @@ namespace Oxide.Plugins
         #region Configuration
 
         [JsonObject(MemberSerialization.OptIn)]
-        private class ShopUISettings
-        {
-            [JsonProperty("Enable skin overlays")]
-            public bool EnableSkinOverlays = false;
-
-            [JsonProperty("Enable liquid overlays")]
-            public bool EnableLiquidOverlays = false;
-
-            [JsonIgnore]
-            public bool EnableOverlays => EnableSkinOverlays || EnableLiquidOverlays;
-        }
-
-        [JsonObject(MemberSerialization.OptIn)]
         private class PaymentProviderConfig
         {
             [JsonProperty("Enabled")]
@@ -4906,9 +4624,6 @@ namespace Oxide.Plugins
         {
             [JsonProperty("Enable liquid currency")]
             public bool EnableLiquidCurrency;
-
-            [JsonProperty("Shop UI settings")]
-            public ShopUISettings ShopUISettings = new();
 
             [JsonProperty("Economics integration")]
             public PaymentProviderConfig Economics = new();
