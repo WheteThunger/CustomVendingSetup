@@ -1768,8 +1768,7 @@ namespace Oxide.Plugins
 
             public static string RenderAdminUI(CustomVendingSetup plugin, BasePlayer player, NPCVendingMachine vendingMachine, VendingProfile profile)
             {
-                var numSellOrders = vendingMachine.sellOrders?.sellOrders.Count ?? 0;
-                var offsetY = 137.5f + 74 * numSellOrders;
+                var offsetY = 588.5f;
                 var offsetX = 192;
 
                 var cuiElements = new CuiElementContainer
