@@ -25,7 +25,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.17.0")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.17.1")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -79,7 +79,7 @@ namespace Oxide.Plugins
         private bool _performingInstantRestock;
         private VendingItem _itemBeingSold;
         private List<Item> _reusableItemList = new();
-        private HashSet<int> _reusableIntSet = new();
+        private HashSet<(int, ulong)> _reusableItemSet = new();
         private object[] _objectArray1 = new object[1];
         private object[] _objectArray2 = new object[2];
 
@@ -1213,11 +1213,12 @@ namespace Oxide.Plugins
             return highestUsedSlot;
         }
 
-        private static void AddItemForNetwork(ProtoBuf.ItemContainer containerData, int slot, int itemId, int amount, ItemId uid)
+        private static void AddItemForNetwork(ProtoBuf.ItemContainer containerData, int slot, int itemId, ulong skin, int amount, ItemId uid)
         {
             var itemData = Pool.Get<ProtoBuf.Item>();
             itemData.slot = slot;
             itemData.itemid = itemId;
+            itemData.skinid = skin;
             itemData.amount = amount;
             itemData.UID = uid;
             containerData.contents.Add(itemData);
@@ -1295,6 +1296,7 @@ namespace Oxide.Plugins
                     containerData,
                     slot: nextInvisibleSlot,
                     itemId: _config.Economics.ItemDefinition.itemid,
+                    skin: _config.Economics.ItemSkinId,
                     amount: _paymentProviderResolver.EconomicsPaymentProvider.GetBalance(player),
                     uid: new ItemId(ulong.MaxValue - (ulong)nextInvisibleSlot)
                 );
@@ -1307,6 +1309,7 @@ namespace Oxide.Plugins
                     containerData,
                     slot: nextInvisibleSlot,
                     itemId: _config.ServerRewards.ItemDefinition.itemid,
+                    skin:_config.ServerRewards.ItemSkinId,
                     amount: _paymentProviderResolver.ServerRewardsPaymentProvider.GetBalance(player),
                     uid: new ItemId(ulong.MaxValue - (ulong)nextInvisibleSlot)
                 );
@@ -1315,17 +1318,17 @@ namespace Oxide.Plugins
 
             if (_config.EnableLiquidCurrency && profile.HasLiquidCurrency())
             {
-                _reusableIntSet.Clear();
+                _reusableItemSet.Clear();
 
                 foreach (var offer in profile.Offers)
                 {
                     if (offer.CurrencyItem?.IsLiquidContainer(out var liquidDefinition) == true)
                     {
-                        _reusableIntSet.Add(liquidDefinition.itemid);
+                        _reusableItemSet.Add((liquidDefinition.itemid, offer.CurrencyItem.SkinId));
                     }
                 }
 
-                foreach (var itemId in _reusableIntSet)
+                foreach (var (itemId, skinId) in _reusableItemSet)
                 {
                     var itemQuery = new ItemQuery { ItemId = itemId };
                     var amount = SumPlayerItems(player, ref itemQuery);
@@ -1333,6 +1336,7 @@ namespace Oxide.Plugins
                         containerData,
                         slot: nextInvisibleSlot,
                         itemId: itemId,
+                        skin: skinId,
                         amount: amount,
                         uid: new ItemId(ulong.MaxValue - (ulong)nextInvisibleSlot)
                     );
