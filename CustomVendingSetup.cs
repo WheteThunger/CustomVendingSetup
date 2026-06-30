@@ -25,7 +25,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.17.1")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.17.2")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -2003,6 +2003,14 @@ namespace Oxide.Plugins
             public Vector3 GetPosition() => _position;
         }
 
+        private static class RPCUtils
+        {
+            public static void OpenLootPanel(BasePlayer player, string panelName)
+            {
+                player.ClientRPC(RpcTarget.Player("RPC_OpenLootPanel", player), panelName);
+            }
+        }
+
         #endregion
 
         #region Payment Providers
@@ -3073,7 +3081,7 @@ namespace Oxide.Plugins
                 playerLoot.MarkDirty();
                 playerLoot.AddContainer(containerEntity.inventory);
                 playerLoot.SendImmediate();
-                player.ClientRPCPlayer(null, player, "RPC_OpenLootPanel", containerEntity.panelName);
+                RPCUtils.OpenLootPanel(player, containerEntity.panelName);
             }
 
             public BasePlayer EditorPlayer { get; }
