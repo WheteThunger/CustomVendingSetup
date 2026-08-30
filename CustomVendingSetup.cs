@@ -25,7 +25,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.17.2")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.17.3")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -3512,7 +3512,8 @@ namespace Oxide.Plugins
 
                 // Disable food spoiling
                 _vendingMachine.PoweredFoodSpoilageRateMultiplier = 0f;
-                _vendingMachine.SetFlag(IOEntity.Flag_HasPower, true);
+                using var flagsScope = _vendingMachine.StartSetFlags(BaseEntity.FlagsUpdateMode.SendNetworkUpdate_Flags);
+                flagsScope.Set(IOEntity.Flag_HasPower, true);
 
                 if (_vendingMachine.numSlots == 0 || _vendingMachine.inventory.capacity == 0)
                 {
@@ -3538,7 +3539,7 @@ namespace Oxide.Plugins
 
                 if (_vendingMachine.IsBroadcasting() != profile.Broadcast)
                 {
-                    _vendingMachine.SetFlag(VendingMachineFlags.Broadcasting, profile.Broadcast);
+                    flagsScope.Set(VendingMachineFlags.Broadcasting, profile.Broadcast);
                     _vendingMachine.UpdateMapMarker();
                 }
 
@@ -3779,7 +3780,8 @@ namespace Oxide.Plugins
 
                 if (_originalBroadcast != null && _originalBroadcast != _vendingMachine.IsBroadcasting())
                 {
-                    _vendingMachine.SetFlag(VendingMachineFlags.Broadcasting, _originalBroadcast.Value);
+                    using var flagsScope = _vendingMachine.StartSetFlags(BaseEntity.FlagsUpdateMode.SendNetworkUpdate_Flags);
+                    flagsScope.Set(VendingMachineFlags.Broadcasting, _originalBroadcast.Value);
                     _vendingMachine.UpdateMapMarker();
                 }
 
