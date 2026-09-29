@@ -25,7 +25,7 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("Custom Vending Setup", "WhiteThunder", "2.17.3")]
+    [Info("Custom Vending Setup", "WhiteThunder", "2.17.4")]
     [Description("Allows editing orders at NPC vending machines.")]
     internal class CustomVendingSetup : CovalencePlugin
     {
@@ -52,6 +52,7 @@ namespace Oxide.Plugins
         private const int GeneralSettingsNoteSlot = 29;
         private const int ContainerCapacity = 30;
         private const int MaxItemRows = ContainerCapacity / ItemsPerRow;
+        private const int ScrapItemId = -932201673;
         private const int BlueprintItemId = -996920608;
         private const float MinCurrencyCondition = 0.5f;
 
@@ -293,7 +294,7 @@ namespace Oxide.Plugins
 
             var sellAmount = offer.SellItem.Amount * numberOfTransactions;
             var sellOrder = vendingMachine.sellOrders.sellOrders[sellOrderIndex];
-            if (offer.SellItem.ItemDefinition == NPCVendingMachine.ScrapItem && sellOrder.receivedQuantityMultiplier != 1f)
+            if (offer.SellItem.ItemId == ScrapItemId && sellOrder.receivedQuantityMultiplier != 1f)
             {
                 // Modify the amount of scrap received according to dynamic pricing.
                 sellAmount = GetTotalReceivedMerchandiseForOrder(offer.SellItem.Amount, sellOrder.receivedQuantityMultiplier) * numberOfTransactions;
@@ -3612,7 +3613,7 @@ namespace Oxide.Plugins
                 for (var i = 0; i < _vendingMachine.allSalesData.Length; i++)
                 {
                     var sellOrder = _vendingMachine.sellOrders.sellOrders.ElementAtOrDefault(i);
-                    var isForReceivedCurrency = sellOrder?.itemToSellID == NPCVendingMachine.ScrapItem.itemid;
+                    var isForReceivedCurrency = sellOrder?.itemToSellID == ScrapItemId;
                     _vendingMachine.allSalesData[i].IsForReceivedCurrency = isForReceivedCurrency;
                 }
             }
